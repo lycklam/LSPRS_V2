@@ -46,12 +46,12 @@ export interface ScoringResult {
 export async function runScoringEngine(submissionId: string): Promise<ScoringResult> {
 
   // 1. Submission context
-  const { data: sub, error: subErr } = await supabase
+  const { data: sub } = await supabase
     .from("submissions")
     .select("id, supplier_id, location_id")
     .eq("id", submissionId)
-    .single();
-  if (subErr || !sub) throw new Error(`Submission not found: ${submissionId}`);
+    .maybeSingle();
+  if (!sub) throw new Error(`Submission not found: ${submissionId}`);
 
   // 2. Reference data — load in parallel
   const [

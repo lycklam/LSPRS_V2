@@ -1,7 +1,5 @@
 import { useState, useEffect } from "react";
 import { supabase, CAT_COLORS, calcPoints } from "@/lib/supabase";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 interface Props {
   selection: any;
@@ -11,10 +9,8 @@ interface Props {
   onContinue: () => void;
 }
 
-// ── FIX: Correct zero-tolerance metric numbers (were 32 & 34, now 20 & 22) ───
-const ZERO_TOLERANCE_METRICS = [20, 22];
-// ── FIX: Delivery metrics with 85% threshold ─────────────────────────────────
-const BELOW_THRESHOLD_METRICS = [1, 2, 3, 4];
+const ZERO_TOL = [20, 22];
+const BELOW_THRESH = [1, 2, 3, 4];
 
 export default function Step2MetricEntry({ selection, metricValues, onChange, onBack, onContinue }: Props) {
   const [categories, setCategories] = useState<any[]>([]);
@@ -22,7 +18,6 @@ export default function Step2MetricEntry({ selection, metricValues, onChange, on
   const [relevance, setRelevance] = useState<Record<string, boolean>>({});
   const [bands, setBands] = useState<any[]>([]);
   const [prevValues, setPrevValues] = useState<Record<string, number>>({});
-  const [flags, setFlags] = useState<{ name: string; reason: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,66 +25,30 @@ export default function Step2MetricEntry({ selection, metricValues, onChange, on
       supabase.from("categories").select("*").order("number"),
       supabase.from("metrics").select("*, sub_categories(name)").eq("reported_by", "lsp").order("sort_order"),
       supabase.from("scoring_bands").select("*").order("band_order"),
-    ]).then(([c, m, b]) => {
-      setCategories(c.data || []);
-      setAllMetrics(m.data || []);
-      setBands(b.data || []);
-      setLoading(false);
-    });
+    ]).then(([c, m, b]) => { setCategories(c.data || []); setAllMetrics(m.data || []); setBands(b.data || []); setLoading(false); });
   }, []);
 
-  // ── FIX: Query relevance by location_id first, fall back to supplier-level ──
   useEffect(() => {
     if (!selection?.supplier_id || !allMetrics.length) return;
-
-    const defaultRel: Record<string, boolean> = {};
-    allMetrics.forEach(m => { defaultRel[m.id] = true; });
-
-    // Load supplier-level defaults first
-    supabase.from("metric_relevance")
-      .select("metric_id,is_relevant")
-      .eq("supplier_id", selection.supplier_id)
-      .is("location_id", null)
-      .then(({ data: supplierData }) => {
-        const rel = { ...defaultRel };
-        (supplierData || []).forEach(r => { rel[r.metric_id] = r.is_relevant; });
-
-        // Override with location-level settings if location is selected
-        if (!selection?.location_id) {
-          setRelevance(rel);
-          return;
-        }
-        supabase.from("metric_relevance")
-          .select("metric_id,is_relevant")
-          .eq("supplier_id", selection.supplier_id)
-          .eq("location_id", selection.location_id)
-          .then(({ data: locationData }) => {
-            (locationData || []).forEach(r => { rel[r.metric_id] = r.is_relevant; });
-            setRelevance(rel);
-          });
+    const rel: Record<string, boolean> = {};
+    allMetrics.forEach(m => { rel[m.id] = true; });
+    supabase.from("metric_relevance").select("metric_id,is_relevant").eq("supplier_id", selection.supplier_id).is("location_id", null)
+      .then(({ data: sd }) => {
+        (sd || []).forEach(r => { rel[r.metric_id] = r.is_relevant; });
+        if (!selection?.location_id) { setRelevance(rel); return; }
+        supabase.from("metric_relevance").select("metric_id,is_relevant").eq("supplier_id", selection.supplier_id).eq("location_id", selection.location_id)
+          .then(({ data: ld }) => { (ld || []).forEach(r => { rel[r.metric_id] = r.is_relevant; }); setRelevance(rel); });
       });
   }, [selection?.supplier_id, selection?.location_id, allMetrics]);
 
-  // Load previous month values for carry-forward reference
   useEffect(() => {
     if (!selection?.location_id) return;
-    const pm = selection.month === 1 ? 12 : selection.month - 1;
-    const py = selection.month === 1 ? selection.year - 1 : selection.year;
-    supabase.from("submissions")
-      .select("id")
-      .eq("location_id", selection.location_id)
-      .eq("reporting_month", pm)
-      .eq("reporting_year", py)
+    const pm = selection.month === 1 ? 12 : selection.month - 1, py = selection.month === 1 ? selection.year - 1 : selection.year;
+    supabase.from("submissions").select("id").eq("location_id", selection.location_id).eq("reporting_month", pm).eq("reporting_year", py)
       .then(({ data }) => {
         if (!data?.length) return;
-        supabase.from("responses")
-          .select("metric_id,value_numeric")
-          .eq("submission_id", data[0].id)
-          .then(({ data: rs }) => {
-            const pv: Record<string, number> = {};
-            (rs || []).forEach(r => { if (r.value_numeric !== null) pv[r.metric_id] = r.value_numeric; });
-            setPrevValues(pv);
-          });
+        supabase.from("responses").select("metric_id,value_numeric").eq("submission_id", data[0].id)
+          .then(({ data: rs }) => { const pv: Record<string, number> = {}; (rs || []).forEach(r => { if (r.value_numeric !== null) pv[r.metric_id] = r.value_numeric; }); setPrevValues(pv); });
       });
   }, [selection?.location_id, selection?.month, selection?.year]);
 
@@ -101,127 +60,114 @@ export default function Step2MetricEntry({ selection, metricValues, onChange, on
   });
 
   const getBands = (id: string) => bands.filter(b => b.metric_id === id).sort((a: any, b: any) => a.band_order - b.band_order);
-  const getMatchBand = (id: string, val: string) => {
-    if (!val) return null;
-    const n = Number(val);
-    return getBands(id).find(b => n >= b.threshold_min && n <= b.threshold_max) || null;
-  };
+  const getMatchBand = (id: string, val: string) => { if (!val) return null; const n = Number(val); return getBands(id).find(b => n >= b.threshold_min && n <= b.threshold_max) || null; };
+  const isZeroTol = (m: any) => ZERO_TOL.includes(m.number);
+  const isFlagged = (m: any, val: string) => val && ((isZeroTol(m) && Number(val) >= 1) || (BELOW_THRESH.includes(m.number) && Number(val) < 85));
 
-  // ── FIX: Use correct metric numbers for flag detection ────────────────────
-  const isZeroTol = (m: any) => ZERO_TOLERANCE_METRICS.includes(m.number);
-  const isBelowThreshold = (m: any, val: string) =>
-    BELOW_THRESHOLD_METRICS.includes(m.number) && Number(val) < 85;
+  const flags = metrics.filter(m => {
+    const val = metricValues[m.id]; if (!val) return false;
+    return isFlagged(m, val);
+  });
 
-  const detectFlags = () => {
-    const f: { name: string; reason: string }[] = [];
-    metrics.forEach(m => {
-      const val = metricValues[m.id];
-      if (!val) return;
-      if (isZeroTol(m) && Number(val) >= 1)
-        f.push({ name: m.name, reason: "Zero tolerance — any incident = 0 pts" });
-      if (isBelowThreshold(m, val))
-        f.push({ name: m.name, reason: `${val}% below 85% threshold` });
-    });
-    return f;
-  };
-
-  const handleContinue = () => { setFlags(detectFlags()); onContinue(); };
-  const metricsByCat = categories
-    .map(cat => ({ ...cat, metrics: metrics.filter(m => m.category_id === cat.id) }))
-    .filter(c => c.metrics.length > 0);
+  const metricsByCat = categories.map(cat => ({ ...cat, metrics: metrics.filter(m => m.category_id === cat.id) })).filter(c => c.metrics.length > 0);
   const filledCount = metrics.filter(m => metricValues[m.id] !== undefined && metricValues[m.id] !== "").length;
 
-  if (loading) return <div className="p-12 text-center text-gray-400">Loading metrics...</div>;
+  if (loading) return <div style={{ padding: 48, textAlign: "center", color: "#94A3B8" }}>Loading metrics…</div>;
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 860 }}>
+      <style>{`
+        .s2-topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+        .s2-title{font-size:18px;font-weight:700;color:#0F1B2D;letter-spacing:-0.02em}
+        .s2-sub{font-size:13px;color:#64748B;margin-top:3px}
+        .s2-back{height:36px;padding:0 16px;background:#fff;color:#475569;border:1.5px solid #E2E8F0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif}
+        .s2-back:hover{border-color:#94A3B8;color:#0F1B2D}
+        .s2-flag-box{background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:14px 18px}
+        .s2-flag-title{font-size:13.5px;font-weight:700;color:#B91C1C;margin-bottom:8px}
+        .s2-flag-item{font-size:13px;color:#DC2626;display:flex;gap:8px;margin-bottom:4px}
+        .s2-cat{background:#fff;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(15,27,45,0.06)}
+        .s2-cat-hdr{padding:13px 20px;border-bottom:1px solid #F1F5F9;display:flex;align-items:center;gap:10px;background:#FAFBFC}
+        .s2-metric{padding:18px 20px;border-bottom:1px solid #F8FAFC;display:flex;align-items:flex-start;gap:16px}
+        .s2-metric:last-child{border-bottom:none}
+        .s2-metric.flagged{background:#FFF8F8}
+        .s2-metric-info{flex:1;min-width:0}
+        .s2-metric-name{font-size:14px;font-weight:600;color:#1E293B}
+        .s2-metric-sub{font-size:12px;color:#94A3B8;margin-top:2px}
+        .s2-prev{font-size:11.5px;color:#94A3B8;margin-top:3px}
+        .s2-ztol{font-size:11.5px;color:#D97706;font-weight:600;margin-top:4px}
+        .s2-band-pill{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;margin-top:6px}
+        .s2-input-col{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+        .s2-input-row{display:flex;align-items:center;gap:6px}
+        .s2-input{height:40px;width:100px;padding:0 12px;border:1.5px solid #CBD5E1;border-radius:8px;font-size:14px;font-weight:600;text-align:right;color:#0F1B2D;background:#fff;outline:none;font-family:'DM Sans',sans-serif;transition:border-color 0.15s,box-shadow 0.15s}
+        .s2-input:focus{border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,0.12)}
+        .s2-input.err{border-color:#FCA5A5;background:#FFF8F8}
+        .s2-unit{font-size:13px;color:#94A3B8;font-weight:500}
+        .s2-pts{font-size:12px;font-weight:700}
+        .s2-bottombar{display:flex;align-items:center;justify-content:space-between;padding-top:8px}
+        .s2-continue{height:42px;padding:0 24px;background:#059669;color:#fff;border:none;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:8px}
+        .s2-continue:hover{background:#047857}
+      `}</style>
+
+      <div className="s2-topbar">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Step 2 — Enter Performance Data</h2>
-          <p className="text-sm text-gray-500 mt-1">{filledCount} of {metrics.length} metrics filled · Scoring bands shown as you type</p>
+          <div className="s2-title">Enter Performance Data</div>
+          <div className="s2-sub">{filledCount} of {metrics.length} metrics filled · Scoring bands shown as you type</div>
         </div>
-        <Button variant="outline" onClick={onBack}>← Back</Button>
+        <button className="s2-back" onClick={onBack}>← Back</button>
       </div>
 
       {flags.length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div className="font-semibold text-red-800 mb-2">⚠️ {flags.length} metric{flags.length > 1 ? "s" : ""} below threshold</div>
-          <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
-            {flags.map((f, i) => <li key={i}>{f.name} — {f.reason}</li>)}
-          </ul>
-          <p className="text-xs text-red-500 mt-2">These will be flagged for internal review after submission.</p>
+        <div className="s2-flag-box">
+          <div className="s2-flag-title">⚠ {flags.length} metric{flags.length > 1 ? "s" : ""} below threshold</div>
+          {flags.map(m => <div key={m.id} className="s2-flag-item"><span>•</span><span>{m.name} — {isZeroTol(m) ? "Zero tolerance" : `${metricValues[m.id]}% below 85% threshold`}</span></div>)}
+          <div style={{ fontSize: 12, color: "#EF4444", marginTop: 6 }}>These will be flagged for internal review after submission.</div>
         </div>
       )}
 
       {metricsByCat.map((cat, ci) => (
-        <div key={cat.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3 bg-gray-50">
-            <span className="inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold"
-              style={{ background: CAT_COLORS[ci] + "22", color: CAT_COLORS[ci] }}>{cat.number}</span>
-            <span className="font-semibold text-sm text-gray-800">{cat.name}</span>
-            <span className="ml-auto text-xs text-gray-400">{cat.weight_pct}% · {cat.max_points} pts</span>
+        <div key={cat.id} className="s2-cat">
+          <div className="s2-cat-hdr">
+            <span style={{ width: 24, height: 24, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0, background: CAT_COLORS[ci] + "22", color: CAT_COLORS[ci] }}>{cat.number}</span>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0F1B2D" }}>{cat.name}</span>
+            <span style={{ marginLeft: "auto", fontSize: 12, color: "#94A3B8" }}>{cat.weight_pct}% · {cat.max_points} pts</span>
           </div>
-          <div className="divide-y divide-gray-50">
-            {cat.metrics.map(m => {
-              const val = metricValues[m.id] || "";
-              const matchBand = getMatchBand(m.id, val);
-              const pts = val ? calcPoints(Number(val), getBands(m.id)) : null;
-              const prev = prevValues[m.id];
-              const zeroTol = isZeroTol(m);
-              const flagged = val && (
-                (zeroTol && Number(val) >= 1) ||
-                isBelowThreshold(m, val)
-              );
-              return (
-                <div key={m.id} className={`p-4 ${flagged ? "bg-red-50/50" : ""}`}>
-                  <div className="flex items-start gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm text-gray-900">{m.name}</div>
-                      <div className="text-xs text-gray-400 mt-0.5">
-                        {m.sub_categories?.name && <span>{m.sub_categories.name} · </span>}
-                        {m.input_type === "percent" ? "Enter %" : "Enter count"} · {m.max_points} pts max
-                      </div>
-                      {prev !== undefined && (
-                        <div className="text-xs text-gray-400 mt-1">Last month: {prev}{m.input_type === "percent" ? "%" : ""}</div>
-                      )}
-                      {zeroTol && (
-                        <div className="text-xs text-amber-600 mt-1 font-medium">⚠ Zero tolerance — any incident = 0 pts</div>
-                      )}
-                      {matchBand && (
-                        <div className={`inline-flex items-center gap-1.5 mt-2 text-xs font-semibold px-2 py-0.5 rounded-full ${flagged ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
-                          {matchBand.label} → {matchBand.points} pts
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type="number" min="0"
-                          max={m.input_type === "percent" ? 100 : undefined}
-                          value={val}
-                          onChange={e => onChange({ ...metricValues, [m.id]: e.target.value })}
-                          placeholder={m.input_type === "percent" ? "0–100" : "Count"}
-                          className={`w-28 text-right ${flagged ? "border-red-300" : ""}`}
-                        />
-                        {m.input_type === "percent" && <span className="text-sm text-gray-400">%</span>}
-                      </div>
-                      {pts !== null && (
-                        <div className={`text-xs font-semibold ${flagged ? "text-red-600" : "text-green-600"}`}>
-                          {pts} / {m.max_points} pts
-                        </div>
-                      )}
-                    </div>
-                  </div>
+          {cat.metrics.map((m: any) => {
+            const val = metricValues[m.id] || "";
+            const matchBand = getMatchBand(m.id, val);
+            const pts = val ? calcPoints(Number(val), getBands(m.id)) : null;
+            const prev = prevValues[m.id];
+            const flagged = isFlagged(m, val);
+            return (
+              <div key={m.id} className={`s2-metric ${flagged ? "flagged" : ""}`}>
+                <div className="s2-metric-info">
+                  <div className="s2-metric-name">{m.name}</div>
+                  <div className="s2-metric-sub">{m.sub_categories?.name ? `${m.sub_categories.name} · ` : ""}{m.input_type === "percent" ? "Enter %" : "Enter count"} · {m.max_points} pts max</div>
+                  {prev !== undefined && <div className="s2-prev">Last month: {prev}{m.input_type === "percent" ? "%" : ""}</div>}
+                  {isZeroTol(m) && <div className="s2-ztol">⚠ Zero tolerance — any incident = 0 pts</div>}
+                  {matchBand && <div className="s2-band-pill" style={{ background: flagged ? "#FEE2E2" : "#DCFCE7", color: flagged ? "#B91C1C" : "#15803D" }}>{matchBand.label} → {matchBand.points} pts</div>}
                 </div>
-              );
-            })}
-          </div>
+                <div className="s2-input-col">
+                  <div className="s2-input-row">
+                    <input type="number" min="0" max={m.input_type === "percent" ? 100 : undefined}
+                      value={val} onChange={e => onChange({ ...metricValues, [m.id]: e.target.value })}
+                      placeholder={m.input_type === "percent" ? "0–100" : "Count"}
+                      className={`s2-input ${flagged ? "err" : ""}`} />
+                    {m.input_type === "percent" && <span className="s2-unit">%</span>}
+                  </div>
+                  {pts !== null && <div className="s2-pts" style={{ color: flagged ? "#DC2626" : "#059669" }}>{pts} / {m.max_points} pts</div>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ))}
 
-      <div className="flex items-center justify-between pt-2">
-        <Button variant="outline" onClick={onBack}>← Back</Button>
-        <Button onClick={handleContinue} className="bg-green-600 hover:bg-green-700 text-white">Review & Submit →</Button>
+      <div className="s2-bottombar">
+        <button className="s2-back" onClick={onBack}>← Back</button>
+        <button className="s2-continue" onClick={onContinue}>
+          Review & Submit
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
       </div>
     </div>
   );

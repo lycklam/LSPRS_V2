@@ -189,6 +189,7 @@ export async function runScoringEngine(submissionId: string): Promise<ScoringRes
     submission_id: submissionId,
     total_score: totalScore,
     score_pct: totalScore,
+    max_possible: 100,
   });
 
   return {

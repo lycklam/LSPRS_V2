@@ -172,10 +172,13 @@ export async function runScoringEngine(submissionId: string): Promise<ScoringRes
   }
 
   // 8. Persist scores — delete then re-insert (idempotent)
-  await supabase.from("category_scores").delete().eq("submission_id", submissionId);
-  await supabase.from("overall_scores").delete().eq("submission_id", submissionId);
+  const { error: delCatErr } = await supabase.from("category_scores").delete().eq("submission_id", submissionId);
+  if (delCatErr) throw new Error("Delete category_scores failed: " + delCatErr.message);
 
-  await supabase.from("category_scores").insert(
+  const { error: delOvErr } = await supabase.from("overall_scores").delete().eq("submission_id", submissionId);
+  if (delOvErr) throw new Error("Delete overall_scores failed: " + delOvErr.message);
+
+  const { error: catErr } = await supabase.from("category_scores").insert(
     categoryScores.map(cs => ({
       submission_id: submissionId,
       category_id: cs.category_id,
@@ -184,13 +187,15 @@ export async function runScoringEngine(submissionId: string): Promise<ScoringRes
       normalized_score: cs.normalized_score,
     }))
   );
+  if (catErr) throw new Error("Insert category_scores failed: " + catErr.message);
 
-  await supabase.from("overall_scores").insert({
+  const { error: ovErr } = await supabase.from("overall_scores").insert({
     submission_id: submissionId,
     total_score: totalScore,
     score_pct: totalScore,
     max_possible: 100,
   });
+  if (ovErr) throw new Error("Insert overall_scores failed: " + ovErr.message);
 
   return {
     submission_id: submissionId,

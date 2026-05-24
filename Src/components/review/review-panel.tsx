@@ -23,6 +23,7 @@ export default function ReviewPanel() {
   const [existingScore, setExistingScore] = useState<any>(null);
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [scoring, setScoring] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -46,7 +47,25 @@ export default function ReviewPanel() {
         .order("categories(number)"),
     ]);
     setResponses(resp || []);
-    setExistingScore(overall?.data ? { overall: overall.data, categories: catScores || [] } : null);
+    const scoreData = overall ? { overall: overall, categories: catScores || [] } : null;
+    setExistingScore(scoreData);
+    // Auto-recalculate if approved but no score stored yet
+    if (sub.status === "approved" && !overall) {
+      try {
+        const result = await runScoringEngine(sub.id);
+        setScoreResult(result);
+        const { data: newCatScores } = await supabase
+          .from("category_scores")
+          .select("*, categories(number,name,weight_pct)")
+          .eq("submission_id", sub.id)
+          .order("categories(number)");
+        const { data: newOverall } = await supabase
+          .from("overall_scores").select("*").eq("submission_id", sub.id).maybeSingle();
+        setExistingScore({ overall: newOverall, categories: newCatScores || [] });
+      } catch (e) {
+        // Silent fail — score will show "approve to calculate"
+      }
+    }
   };
 
   const updateStatus = async (id: string, status: string) => {

@@ -39,7 +39,7 @@ export default function ReviewPanel() {
     setScoreResult(null);
     const [{ data: resp }, { data: overall }, { data: catScores }] = await Promise.all([
       supabase.from("responses").select("*").eq("submission_id", sub.id),
-      supabase.from("overall_scores").select("*").eq("submission_id", sub.id).single(),
+      supabase.from("overall_scores").select("*").eq("submission_id", sub.id).maybeSingle(),
       supabase.from("category_scores")
         .select("*, categories(number,name,weight_pct)")
         .eq("submission_id", sub.id)
@@ -68,7 +68,7 @@ export default function ReviewPanel() {
             .eq("submission_id", id)
             .order("categories(number)");
           const { data: overall } = await supabase
-            .from("overall_scores").select("*").eq("submission_id", id).single();
+            .from("overall_scores").select("*").eq("submission_id", id).maybeSingle();
           setExistingScore({ overall: overall, categories: catScores || [] });
           toast({ title: `✓ Approved — Score: ${result.total_score}/100`, description: `${result.completeness_pct}% of metrics answered` });
         } catch (scoreErr: any) {
@@ -101,7 +101,7 @@ export default function ReviewPanel() {
         .eq("submission_id", selected.id)
         .order("categories(number)");
       const { data: overall } = await supabase
-        .from("overall_scores").select("*").eq("submission_id", selected.id).single();
+        .from("overall_scores").select("*").eq("submission_id", selected.id).maybeSingle();
       setExistingScore({ overall: overall, categories: catScores || [] });
       toast({ title: `Score recalculated: ${result.total_score}/100` });
     } catch (e: any) {

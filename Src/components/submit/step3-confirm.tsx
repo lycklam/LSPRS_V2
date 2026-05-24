@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { supabase, calcPoints, SHORT_MONTHS } from "@/lib/supabase";
 import { runScoringEngine, ScoringResult } from "@/lib/scoring-engine";

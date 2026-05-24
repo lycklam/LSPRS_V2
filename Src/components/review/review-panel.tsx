@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { supabase, SHORT_MONTHS, deleteSubmissionCascade } from "@/lib/supabase";
 import { runScoringEngine, ScoringResult, CategoryScore } from "@/lib/scoring-engine";

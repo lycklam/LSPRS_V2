@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { supabase, calcPoints, SHORT_MONTHS } from "@/lib/supabase";
+import { runScoringEngine, ScoringResult } from "@/lib/scoring-engine";
 import { useToast } from "@/hooks/use-toast";
 
 interface Props {
   selection: any;
   metricValues: Record<string, string>;
   onBack: () => void;
-  onSuccess: (flagCount: number) => void;
+  onSuccess: (flagCount: number, score?: ScoringResult) => void;
 }
 
 const ZERO_TOL = [20, 22];
@@ -15,6 +16,7 @@ const BELOW_THRESH = [1, 2, 3, 4];
 export default function Step3Confirm({ selection, metricValues, onBack, onSuccess }: Props) {
   const [approved, setApproved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitStage, setSubmitStage] = useState("");
   const [metrics, setMetrics] = useState<any[]>([]);
   const [bands, setBands] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,8 +53,13 @@ export default function Step3Confirm({ selection, metricValues, onBack, onSucces
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      // Step 1: Save submission record
+      setSubmitStage("Saving submission…");
       const { data: existing } = await supabase.from("submissions").select("id,status")
-        .eq("location_id", selection.location_id).eq("reporting_month", Number(selection.month)).eq("reporting_year", Number(selection.year));
+        .eq("location_id", selection.location_id)
+        .eq("reporting_month", Number(selection.month))
+        .eq("reporting_year", Number(selection.year));
+
       let subId: string;
       if (existing?.length) {
         subId = existing[0].id;
@@ -61,22 +68,82 @@ export default function Step3Confirm({ selection, metricValues, onBack, onSucces
         const toDelete = (lspResponses || []).filter(r => lspIds.has(r.metric_id)).map(r => r.id);
         if (toDelete.length) await supabase.from("responses").delete().in("id", toDelete);
         await supabase.from("threshold_flags").delete().eq("submission_id", subId);
-        await supabase.from("submissions").update({ submitted_by: selection.submitter, submitted_at: new Date().toISOString(), status: flaggedMetrics.length > 0 ? "flagged" : "submitted" }).eq("id", subId);
+        await supabase.from("submissions").update({
+          submitted_by: selection.submitter,
+          submitted_at: new Date().toISOString(),
+          status: flaggedMetrics.length > 0 ? "flagged" : "submitted",
+        }).eq("id", subId);
       } else {
-        const { data: newSub, error } = await supabase.from("submissions").insert({ location_id: selection.location_id, supplier_id: selection.supplier_id, country_id: selection.country_id, reporting_month: Number(selection.month), reporting_year: Number(selection.year), submitted_by: selection.submitter, submitted_at: new Date().toISOString(), status: flaggedMetrics.length > 0 ? "flagged" : "submitted" }).select("id");
+        const { data: newSub, error } = await supabase.from("submissions").insert({
+          location_id: selection.location_id,
+          supplier_id: selection.supplier_id,
+          country_id: selection.country_id,
+          reporting_month: Number(selection.month),
+          reporting_year: Number(selection.year),
+          submitted_by: selection.submitter,
+          submitted_at: new Date().toISOString(),
+          status: flaggedMetrics.length > 0 ? "flagged" : "submitted",
+        }).select("id");
         if (error) throw error;
         subId = newSub![0].id;
       }
+
+      // Step 2: Save responses
+      setSubmitStage("Saving responses…");
       if (filledMetrics.length) {
-        const { error } = await supabase.from("responses").insert(filledMetrics.map(m => ({ submission_id: subId, metric_id: m.id, value_numeric: Number(metricValues[m.id]), points_earned: getPoints(m.id, metricValues[m.id]), entered_by: selection.submitter, is_flagged: flaggedMetrics.some(f => f.id === m.id) })));
+        const { error } = await supabase.from("responses").insert(
+          filledMetrics.map(m => ({
+            submission_id: subId,
+            metric_id: m.id,
+            value_numeric: Number(metricValues[m.id]),
+            points_earned: getPoints(m.id, metricValues[m.id]),
+            entered_by: selection.submitter,
+            is_flagged: flaggedMetrics.some(f => f.id === m.id),
+          }))
+        );
         if (error) throw error;
       }
+
+      // Step 3: Save threshold flags
       if (flaggedMetrics.length) {
-        await supabase.from("threshold_flags").insert(flaggedMetrics.map(m => ({ submission_id: subId, metric_id: m.id, value_entered: Number(metricValues[m.id]), flag_type: ZERO_TOL.includes(m.number) ? "zero_tolerance" : "below_target" })));
+        await supabase.from("threshold_flags").insert(
+          flaggedMetrics.map(m => ({
+            submission_id: subId,
+            metric_id: m.id,
+            value_entered: Number(metricValues[m.id]),
+            flag_type: ZERO_TOL.includes(m.number) ? "zero_tolerance" : "below_target",
+          }))
+        );
       }
-      toast({ title: "Submission recorded", description: flaggedMetrics.length > 0 ? `${flaggedMetrics.length} metric(s) flagged for review.` : "All data saved successfully." });
-      onSuccess(flaggedMetrics.length);
-    } catch (e: any) { toast({ title: "Submission failed", description: e.message, variant: "destructive" }); }
+
+      // Step 4: Run scoring engine
+      setSubmitStage("Calculating scores…");
+      let scoreResult: ScoringResult | undefined;
+      try {
+        scoreResult = await runScoringEngine(subId);
+      } catch (scoreErr: any) {
+        // Non-fatal — submission saved, scoring failed
+        console.error("Scoring engine error:", scoreErr);
+        toast({
+          title: "Submitted — scoring pending",
+          description: "Data saved. Scores will be calculated when the internal team approves.",
+        });
+        onSuccess(flaggedMetrics.length);
+        return;
+      }
+
+      toast({
+        title: "Submission recorded",
+        description: flaggedMetrics.length > 0
+          ? `${flaggedMetrics.length} metric(s) flagged. Score: ${scoreResult.total_score}/100`
+          : `All data saved. Score: ${scoreResult.total_score}/100 (${scoreResult.completeness_pct}% complete)`,
+      });
+      onSuccess(flaggedMetrics.length, scoreResult);
+
+    } catch (e: any) {
+      toast({ title: "Submission failed", description: e.message, variant: "destructive" });
+    }
+    setSubmitStage("");
     setSubmitting(false);
   };
 
@@ -115,10 +182,13 @@ export default function Step3Confirm({ selection, metricValues, onBack, onSucces
         .s3-check-row{display:flex;align-items:flex-start;gap:10px;cursor:pointer}
         .s3-check{width:18px;height:18px;accent-color:#059669;flex-shrink:0;margin-top:2px}
         .s3-check-text{font-size:13.5px;color:#374151;line-height:1.5}
-        .s3-btn-row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+        .s3-btn-row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center}
         .s3-submit{height:42px;padding:0 24px;background:#059669;color:#fff;border:none;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif}
         .s3-submit:hover{background:#047857}
         .s3-submit:disabled{background:#6EE7B7;cursor:not-allowed}
+        .s3-stage{font-size:12.5px;color:#059669;font-weight:500;display:flex;align-items:center;gap:6px}
+        .s3-spinner{width:14px;height:14px;border:2px solid #BBF7D0;border-top-color:#059669;border-radius:50%;animation:spin 0.7s linear infinite}
+        @keyframes spin{to{transform:rotate(360deg)}}
         .s3-empty{padding:24px 20px;text-align:center;color:#94A3B8;font-size:13px}
       `}</style>
 
@@ -133,7 +203,11 @@ export default function Step3Confirm({ selection, metricValues, onBack, onSucces
       {existingSubmission && (
         <div className="s3-warn">
           <div className="s3-warn-title">⚠ Existing submission for this period</div>
-          <div className="s3-warn-body">A submission for <strong>{SHORT_MONTHS[selection?.month]} {selection?.year}</strong> already exists{existingSubmission.submitted_by ? ` (by ${existingSubmission.submitted_by})` : ""}. Continuing will <strong>overwrite the existing LSP data</strong>. Internal ratings will be preserved.</div>
+          <div className="s3-warn-body">
+            A submission for <strong>{SHORT_MONTHS[selection?.month]} {selection?.year}</strong> already exists
+            {existingSubmission.submitted_by ? ` (by ${existingSubmission.submitted_by})` : ""}.
+            Continuing will <strong>overwrite the existing LSP data</strong> and recalculate scores. Internal ratings will be preserved.
+          </div>
         </div>
       )}
 
@@ -143,14 +217,22 @@ export default function Step3Confirm({ selection, metricValues, onBack, onSucces
           <div><div className="s3-stat-label">Period</div><div className="s3-stat-val">{SHORT_MONTHS[selection?.month]} {selection?.year}</div></div>
           <div><div className="s3-stat-label">Submitted by</div><div className="s3-stat-val">{selection?.submitter}</div></div>
           <div><div className="s3-stat-label">Metrics entered</div><div className="s3-stat-val">{filledMetrics.length} values</div></div>
-          <div><div className="s3-stat-label">Flags</div><div className="s3-stat-val" style={{ color: flaggedMetrics.length > 0 ? "#DC2626" : "#059669" }}>{flaggedMetrics.length > 0 ? `⚠ ${flaggedMetrics.length} below threshold` : "✓ None"}</div></div>
+          <div><div className="s3-stat-label">Flags</div>
+            <div className="s3-stat-val" style={{ color: flaggedMetrics.length > 0 ? "#DC2626" : "#059669" }}>
+              {flaggedMetrics.length > 0 ? `⚠ ${flaggedMetrics.length} below threshold` : "✓ None"}
+            </div>
+          </div>
         </div>
       </div>
 
       {flaggedMetrics.length > 0 && (
         <div className="s3-flag-box">
           <div className="s3-flag-title">⚠ Flagged metrics — internal team will be notified</div>
-          {flaggedMetrics.map(m => <div key={m.id} style={{ fontSize: 13, color: "#DC2626", marginBottom: 3 }}>• {m.name} — {metricValues[m.id]}{m.input_type === "percent" ? "%" : ""}</div>)}
+          {flaggedMetrics.map(m => (
+            <div key={m.id} style={{ fontSize: 13, color: "#DC2626", marginBottom: 3 }}>
+              • {m.name} — {metricValues[m.id]}{m.input_type === "percent" ? "%" : ""}
+            </div>
+          ))}
         </div>
       )}
 
@@ -163,13 +245,16 @@ export default function Step3Confirm({ selection, metricValues, onBack, onSucces
             <thead><tr><th>Metric</th><th>Value</th><th>Points</th></tr></thead>
             <tbody>
               {filledMetrics.map(m => {
-                const val = metricValues[m.id], pts = getPoints(m.id, val);
+                const val = metricValues[m.id];
+                const pts = getPoints(m.id, val);
                 const flagged = flaggedMetrics.some(f => f.id === m.id);
                 return (
                   <tr key={m.id} className={flagged ? "flagged" : ""}>
                     <td>{m.name}{flagged && <span style={{ marginLeft: 6, color: "#DC2626" }}>⚠</span>}</td>
                     <td className="val">{val}{m.input_type === "percent" ? "%" : ""}</td>
-                    <td className="pts" style={{ color: pts === 0 ? "#DC2626" : "#059669" }}>{pts !== null ? `${pts} / ${m.max_points}` : "—"}</td>
+                    <td className="pts" style={{ color: pts === 0 ? "#DC2626" : "#059669" }}>
+                      {pts !== null ? `${pts} / ${m.max_points}` : "—"}
+                    </td>
                   </tr>
                 );
               })}
@@ -182,13 +267,22 @@ export default function Step3Confirm({ selection, metricValues, onBack, onSucces
         <h3>✓ Confirm & Submit</h3>
         <label className="s3-check-row">
           <input type="checkbox" className="s3-check" checked={approved} onChange={e => setApproved(e.target.checked)} />
-          <span className="s3-check-text">I confirm the data entered above is accurate and represents actual performance for the stated period and location.{existingSubmission ? " I understand this will overwrite the existing LSP submission." : ""}</span>
+          <span className="s3-check-text">
+            I confirm the data entered above is accurate and represents actual performance for the stated period and location.
+            {existingSubmission ? " I understand this will overwrite the existing LSP submission." : ""}
+          </span>
         </label>
         <div className="s3-btn-row">
           <button className="s3-submit" onClick={handleSubmit} disabled={!approved || submitting || filledMetrics.length === 0}>
             {submitting ? "Submitting…" : existingSubmission ? "✓ Overwrite & Submit" : "✓ Submit Performance Data"}
           </button>
-          <button className="s3-back" onClick={onBack}>← Back</button>
+          <button className="s3-back" onClick={onBack} style={{ marginLeft: 0 }}>← Back</button>
+          {submitting && submitStage && (
+            <div className="s3-stage">
+              <div className="s3-spinner" />
+              {submitStage}
+            </div>
+          )}
         </div>
       </div>
     </div>

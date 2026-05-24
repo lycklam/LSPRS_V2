@@ -251,8 +251,8 @@ export default function ReportingDashboard() {
   };
 
   const trend = trendData();
-  const locations = locationAggregates();
-  const countries = countryAggregates();
+  const locAggs = locationAggregates();
+  const countryAggs = countryAggregates();
   const catBreakdown = categoryBreakdown();
   const hasScores = overallScores.length > 0;
   const avgOverall = hasScores

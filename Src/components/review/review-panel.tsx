@@ -23,7 +23,6 @@ export default function ReviewPanel() {
   const [existingScore, setExistingScore] = useState<any>(null);
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [saving, setSaving] = useState(false);
-  const [scoring, setScoring] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -89,27 +88,7 @@ export default function ReviewPanel() {
     setSaving(false);
   };
 
-  // Manually re-run scoring on demand
-  const recalculateScore = async () => {
-    if (!selected) return;
-    setScoring(true);
-    try {
-      const result = await runScoringEngine(selected.id);
-      setScoreResult(result);
-      const { data: catScores } = await supabase
-        .from("category_scores")
-        .select("*, categories(number,name,weight_pct)")
-        .eq("submission_id", selected.id)
-        .order("categories(number)");
-      const { data: overall } = await supabase
-        .from("overall_scores").select("*").eq("submission_id", selected.id).maybeSingle();
-      setExistingScore({ overall: overall, categories: catScores || [] });
-      toast({ title: `Score recalculated: ${result.total_score}/100` });
-    } catch (e: any) {
-      toast({ title: "Scoring failed", description: e.message, variant: "destructive" });
-    }
-    setScoring(false);
-  };
+
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
@@ -287,9 +266,7 @@ export default function ReviewPanel() {
                           <div className="rp-score-completeness">{displayScore.completeness}% of metrics answered</div>
                         )}
                       </div>
-                      <button className="rp-rescore-btn" onClick={recalculateScore} disabled={scoring}>
-                        {scoring ? <><div className="rp-scoring-spinner" />Scoring…</> : "↻ Recalculate"}
-                      </button>
+
                     </div>
                     <div className="rp-score-bar-wrap">
                       <div className="rp-score-bar" style={{
@@ -321,9 +298,7 @@ export default function ReviewPanel() {
                 ) : (
                   <div style={{ padding: "12px 20px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 13, color: "#94A3B8" }}>No score yet — approve to calculate</div>
-                    <button className="rp-rescore-btn" onClick={recalculateScore} disabled={scoring}>
-                      {scoring ? <><div className="rp-scoring-spinner" />Scoring…</> : "↻ Calculate Now"}
-                    </button>
+
                   </div>
                 )}
 
@@ -356,14 +331,14 @@ export default function ReviewPanel() {
                   <div className="rp-btn-row">
                     {selected.status !== "approved" && (
                       <button className="rp-btn rp-btn-approve" onClick={() => updateStatus(selected.id, "approved")} disabled={saving}>
-                        {scoring ? "Scoring…" : "✓ Approve"}
+                        {saving ? "Approving & scoring…" : "✓ Approve"}
                       </button>
                     )}
                     {selected.status !== "flagged" && <button className="rp-btn rp-btn-flag" onClick={() => updateStatus(selected.id, "flagged")} disabled={saving}>⚠ Flag</button>}
                     {selected.status !== "submitted" && <button className="rp-btn rp-btn-reset" onClick={() => updateStatus(selected.id, "submitted")} disabled={saving}>↩ Reset</button>}
                     <button className="rp-btn rp-btn-delete" onClick={() => setDeleteTarget(selected)}>Delete</button>
                   </div>
-                  {selected.status === "approved" && <div className="rp-approved-note">✓ Approved — scores saved to database</div>}
+                  {selected.status === "approved" && <div className="rp-approved-note">✓ Approved — scores calculated automatically</div>}
                 </div>
               </div>
             )}

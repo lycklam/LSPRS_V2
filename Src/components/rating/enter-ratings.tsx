@@ -137,6 +137,31 @@ export default function EnterRatings() {
       const periodLabel = `${FULL_MONTHS[form.month - 1]} ${form.year}`;
       const priorLabel = form.month === 1 ? `Dec ${form.year - 1}` : `${FULL_MONTHS[form.month - 2]} ${form.year}`;
 
+      // ── Fetch existing ratings for THIS month first, fall back to prior month ──
+      let prefillValues: Record<string, number> = {};
+      // Try current month first
+      const { data: curSubs } = await supabase.from("submissions").select("id")
+        .eq("location_id", form.location_id)
+        .eq("reporting_month", form.month)
+        .eq("reporting_year", form.year);
+      if (curSubs?.length) {
+        const { data: curResp } = await supabase.from("responses")
+          .select("metric_id,value_likert").eq("submission_id", curSubs[0].id);
+        (curResp || []).forEach(r => { if (r.value_likert !== null) prefillValues[r.metric_id] = r.value_likert; });
+      }
+      // If no current month data, fall back to prior month
+      if (!Object.keys(prefillValues).length) {
+        const pm = form.month === 1 ? 12 : form.month - 1;
+        const py = form.month === 1 ? form.year - 1 : form.year;
+        const { data: priorSubs } = await supabase.from("submissions").select("id")
+          .eq("location_id", form.location_id).eq("reporting_month", pm).eq("reporting_year", py);
+        if (priorSubs?.length) {
+          const { data: priorResp } = await supabase.from("responses")
+            .select("metric_id,value_likert").eq("submission_id", priorSubs[0].id);
+          (priorResp || []).forEach(r => { if (r.value_likert !== null) prefillValues[r.metric_id] = r.value_likert; });
+        }
+      }
+
       const wb = XLSX.utils.book_new();
 
       // Instructions sheet
@@ -163,7 +188,7 @@ export default function EnterRatings() {
       const headers = ["#", "Category", "Metric Name", "Rating (1-5)", `Prior (${priorLabel})`, "1", "2", "3", "4", "5"];
       const rows = [headers];
       metrics.forEach(m => {
-        const prior = prevValues[m.id] ?? "";
+        const prior = prefillValues[m.id] ?? "";
         const mAnchors = anchors
           .filter(a => a.metric_id === m.id)
           .sort((a, b) => a.score - b.score)
@@ -198,11 +223,19 @@ export default function EnterRatings() {
       ];
       ws["!rows"] = rows.map((_, i) => i === 0 ? { hpt: 20 } : { hpt: 48 });
 
+      // Apply styles — requires xlsx with cellStyles support
       const hdStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0F1B2D" } }, alignment: { horizontal: "center", vertical: "center" } };
       const valStyle = { fill: { fgColor: { rgb: "FFFDE7" } }, alignment: { horizontal: "center", vertical: "center" } };
-      const carriedStyle = { fill: { fgColor: { rgb: "E3F2FD" } }, alignment: { horizontal: "center", vertical: "center" }, font: { bold: true, color: { rgb: "1565C0" } } };
+      const carriedStyle = { fill: { fgColor: { rgb: "DBEAFE" } }, alignment: { horizontal: "center", vertical: "center" }, font: { bold: true, color: { rgb: "1565C0" } } };
       const refStyle = { fill: { fgColor: { rgb: "F5F5F5" } }, font: { color: { rgb: "9E9E9E" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } };
-      const anchorHdStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 }, fill: { fgColor: { rgb: "1A2E4A" } }, alignment: { horizontal: "center", vertical: "center" } };
+      const anchorHdStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 }, fill: { fgColor: { rgb: "1A2E4A" } }, alignment: { horizontal: "center", vertical: "center" } };
+      const scoreBgStyles = [
+        { fill: { fgColor: { rgb: "FFF8F0" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
+        { fill: { fgColor: { rgb: "FFF9E6" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
+        { fill: { fgColor: { rgb: "F5FFF0" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
+        { fill: { fgColor: { rgb: "F0FFF5" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
+        { fill: { fgColor: { rgb: "F0F8FF" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
+      ];
 
       headers.forEach((_, i) => {
         const c = XLSX.utils.encode_cell({ r: 0, c: i });
@@ -213,21 +246,14 @@ export default function EnterRatings() {
         const rCell = XLSX.utils.encode_cell({ r, c: 3 });
         if (ws[rCell]) ws[rCell].s = ratingVal !== "" ? carriedStyle : valStyle;
         const pCell = XLSX.utils.encode_cell({ r, c: 4 });
-        if (ws[pCell]) ws[pCell].s = { fill: { fgColor: { rgb: "F1F5F9" } }, font: { color: { rgb: "94A3B8" } }, alignment: { horizontal: "center", vertical: "center" } };
-        // Ref columns: #, Category, Metric Name
+        if (ws[pCell]) ws[pCell].s = { fill: { fgColor: { rgb: "EFF6FF" } }, font: { color: { rgb: "94A3B8" } }, alignment: { horizontal: "center", vertical: "center" } };
         [0, 1, 2].forEach(c => {
           const cell = XLSX.utils.encode_cell({ r, c });
           if (ws[cell]) ws[cell].s = refStyle;
         });
-        // Score description columns: alternating light tint per score
-        const scoreBgs = ["FFF8F0","FFFBF0","F8FFF0","F0FFF8","F0F8FF"];
-        [5,6,7,8,9].forEach((c, si) => {
+        [5, 6, 7, 8, 9].forEach((c, si) => {
           const cell = XLSX.utils.encode_cell({ r, c });
-          if (ws[cell]) ws[cell].s = {
-            fill: { fgColor: { rgb: scoreBgs[si] } },
-            font: { color: { rgb: "475569" }, sz: 9 },
-            alignment: { wrapText: true, vertical: "top" }
-          };
+          if (ws[cell]) ws[cell].s = scoreBgStyles[si];
         });
       }
       XLSX.utils.book_append_sheet(wb, ws, "Ratings Entry");
@@ -249,7 +275,7 @@ export default function EnterRatings() {
       XLSX.utils.book_append_sheet(wb, metaWs, "_meta");
 
       const fn = `Internal_Ratings_${sup?.name?.replace(/\s+/g, "_")}_${loc?.name?.replace(/\s+/g, "_")}_${FULL_MONTHS[form.month - 1]}_${form.year}.xlsx`;
-      XLSX.writeFile(wb, fn);
+      XLSX.writeFile(wb, fn, { cellStyles: true });
     } catch (e) { console.error(e); }
     setXlDownloading(false);
   };

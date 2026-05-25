@@ -56,20 +56,7 @@ function TrendChart({ trend, catColors, scoreColor, scoreBg }: any) {
   const lspBarH = (pts: number, maxH: number) => Math.max((pts / MAX_LSP) * maxH, pts > 0 ? 2 : 0);
   const intBarH = (pts: number, maxH: number) => Math.max((pts / MAX_INT) * maxH, pts > 0 ? 2 : 0);
 
-  // Compute segment centre Y for connecting dots
-  const segCentreY = (mi: number, cid: string, type: "lsp"|"int") => {
-    const t = trend[mi];
-    const cats = t.cats
-      .filter((c: any) => type === "lsp" ? c.lspAvg > 0 : c.intAvg > 0)
-      .sort((a: any, b: any) => a.number - b.number);
-    let cum = 0;
-    for (const c of cats) {
-      const h = type === "lsp" ? lspBarH(c.lspAvg, plotH) : intBarH(c.intAvg, plotH);
-      if (c.cid === cid) return BASE_Y - cum - h / 2;
-      cum += h;
-    }
-    return null;
-  };
+
 
   const renderChart = (type: "lsp" | "int", title: string, subtitle: string) => {
     const maxPts = type === "lsp" ? MAX_LSP : MAX_INT;
@@ -98,22 +85,7 @@ function TrendChart({ trend, catColors, scoreColor, scoreBg }: any) {
             );
           })}
 
-          {/* Connecting lines per category */}
-          {allCats.map((cat, ci) => {
-            const color = catColors[ci % catColors.length];
-            const points: { x: number; y: number }[] = [];
-            trend.forEach((t: any, mi: number) => {
-              const c = t.cats.find((c: any) => c.cid === cat.cid && getAvg(c) > 0);
-              if (!c) return;
-              const y = segCentreY(mi, cat.cid, type);
-              if (y !== null) points.push({ x: colX(mi), y });
-            });
-            return points.length > 1 ? points.map((pt, pi) => pi < points.length - 1 ? (
-              <line key={`${cat.cid}-${pi}`}
-                x1={pt.x} y1={pt.y} x2={points[pi + 1].x} y2={points[pi + 1].y}
-                stroke={color} strokeWidth={1.5} strokeOpacity={0.4} />
-            ) : null) : null;
-          })}
+          {/* Connecting lines removed */}
 
           {/* Stacked bars */}
           {trend.map((t: any, mi: number) => {
@@ -156,15 +128,7 @@ function TrendChart({ trend, catColors, scoreColor, scoreBg }: any) {
             return (
               <g key={t.key}>
                 {rects}
-                {/* Dot markers on connecting lines */}
-                {allCats.map((cat, ci) => {
-                  const c = t.cats.find((c: any) => c.cid === cat.cid && getAvg(c) > 0);
-                  if (!c) return null;
-                  const y = segCentreY(mi, cat.cid, type);
-                  if (y === null) return null;
-                  return <circle key={cat.cid} cx={colX(mi)} cy={y} r={2.5}
-                    fill={catColors[ci % catColors.length]} stroke="#fff" strokeWidth={1} />;
-                })}
+                {/* Dot markers removed */}
                 {/* Month label */}
                 <text x={colX(mi)} y={CHART_H - 4} textAnchor="middle"
                   fontSize={10} fill="#94A3B8" fontFamily="DM Sans,sans-serif">

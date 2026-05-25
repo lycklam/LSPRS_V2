@@ -68,20 +68,47 @@ export default function EnterRatings() {
     if (!form.location_id) return;
     setPrevValues({});
     setValues({});
-    const pm = form.month === 1 ? 12 : form.month - 1;
-    const py = form.month === 1 ? form.year - 1 : form.year;
-    supabase.from("submissions").select("id")
-      .eq("location_id", form.location_id).eq("reporting_month", pm).eq("reporting_year", py)
-      .then(({ data }) => {
-        if (!data?.length) return;
-        supabase.from("responses").select("metric_id,value_likert").eq("submission_id", data[0].id)
-          .then(({ data: rs }) => {
-            const pv: Record<string, number> = {};
-            (rs || []).forEach(r => { if (r.value_likert) pv[r.metric_id] = r.value_likert; });
-            setPrevValues(pv);
-            setValues(pv);
-          });
-      });
+
+    const loadValues = async () => {
+      // Try current month first (existing ratings for this period)
+      const { data: curSubs } = await supabase.from("submissions").select("id")
+        .eq("location_id", form.location_id)
+        .eq("reporting_month", form.month)
+        .eq("reporting_year", form.year);
+
+      if (curSubs?.length) {
+        const { data: curRs } = await supabase.from("responses")
+          .select("metric_id,value_likert")
+          .eq("submission_id", curSubs[0].id)
+          .not("value_likert", "is", null);
+        if (curRs?.length) {
+          const pv: Record<string, number> = {};
+          curRs.forEach(r => { pv[r.metric_id] = r.value_likert; });
+          setPrevValues(pv);
+          setValues(pv);
+          return; // current month has data — use it, don't fall back
+        }
+      }
+
+      // Fall back to prior month for carry-forward
+      const pm = form.month === 1 ? 12 : form.month - 1;
+      const py = form.month === 1 ? form.year - 1 : form.year;
+      const { data: priorSubs } = await supabase.from("submissions").select("id")
+        .eq("location_id", form.location_id)
+        .eq("reporting_month", pm)
+        .eq("reporting_year", py);
+      if (!priorSubs?.length) return;
+      const { data: priorRs } = await supabase.from("responses")
+        .select("metric_id,value_likert")
+        .eq("submission_id", priorSubs[0].id)
+        .not("value_likert", "is", null);
+      const pv: Record<string, number> = {};
+      (priorRs || []).forEach(r => { pv[r.metric_id] = r.value_likert; });
+      setPrevValues(pv);
+      setValues(pv);
+    };
+
+    loadValues();
   }, [form.location_id, form.month, form.year]);
 
   // ── FIX: deduplicate anchors by score per metric to prevent double buttons ──
@@ -136,6 +163,7 @@ export default function EnterRatings() {
       const country = countries.find(c => c.id === form.country_id);
       const periodLabel = `${FULL_MONTHS[form.month - 1]} ${form.year}`;
       const priorLabel = form.month === 1 ? `Dec ${form.year - 1}` : `${FULL_MONTHS[form.month - 2]} ${form.year}`;
+      const currentLabel = `${FULL_MONTHS[form.month - 1]} ${form.year}`;
 
       // ── Fetch existing ratings ───────────────────────────────────────────────
       // Priority: (1) current month Likert values, (2) prior month Likert values
@@ -197,8 +225,9 @@ export default function EnterRatings() {
       XLSX.utils.book_append_sheet(wb, instrWs, "Instructions");
 
       // Ratings sheet — columns: #, Category, Metric, Rating, Low description, High description
-      // Columns: #, Category, Metric Name, Rating (1-5), Prior, 1, 2, 3, 4, 5
-      const headers = ["#", "Category", "Metric Name", "Rating (1-5)", `Prior (${priorLabel})`, "1", "2", "3", "4", "5"];
+      // Columns: #, Category, Metric Name, Rating (1-5), Prior/Current, 1, 2, 3, 4, 5
+      const prefillLabel = currentMonthHasLikert ? `Current (${currentLabel})` : `Prior (${priorLabel})`;
+      const headers = ["#", "Category", "Metric Name", "Rating (1-5)", prefillLabel, "1", "2", "3", "4", "5"];
       const rows = [headers];
       metrics.forEach(m => {
         const prior = prefillValues[m.id] ?? "";

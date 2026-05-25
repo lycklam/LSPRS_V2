@@ -1,7 +1,8 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from "react";
 import { supabase, FULL_MONTHS, SHORT_MONTHS } from "@/lib/supabase";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx/dist/xlsx.full.min.js";
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LSP Excel Template Download + Upload

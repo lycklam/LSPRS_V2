@@ -27,18 +27,16 @@ const SEL = `height:36px;padding:0 10px;border:1.5px solid #CBD5E1;border-radius
 // TREND CHART — SVG stacked bars + connecting lines per category
 // ─────────────────────────────────────────────────────────────────────────────
 function TrendChart({ trend, catColors, scoreColor, scoreBg }: any) {
-  const COL_W = 80;    // width per month column
-  const BAR_W = 52;    // bar width within column
-  const CHART_H = 220; // chart area height (px)
-  const PAD_L = 40;    // left padding for y-axis labels
-  const PAD_T = 16;
-  const PAD_B = 32;    // bottom for month labels
-  const SECTION_GAP = 8; // gap between LSP and internal stacks
-
-  const totalW = Math.max(trend.length * COL_W + PAD_L + 20, 400);
+  const COL_W = 80;
+  const BAR_W = 48;
+  const CHART_H = 180;  // height of each chart
+  const PAD_L = 44;
+  const PAD_T = 12;
+  const PAD_B = 28;     // bottom for month labels
   const plotH = CHART_H - PAD_T - PAD_B;
+  const totalW = Math.max(trend.length * COL_W + PAD_L + 20, 400);
 
-  // Collect all unique categories across all months (sorted)
+  // All unique categories sorted by number
   const allCats: any[] = [];
   const catSeen = new Set<string>();
   trend.forEach((t: any) => {
@@ -48,222 +46,172 @@ function TrendChart({ trend, catColors, scoreColor, scoreBg }: any) {
   });
   allCats.sort((a, b) => a.number - b.number);
 
-  // Split into LSP categories (no intAvg) and internal categories (have intAvg)
-  // We'll show two stacked sections per month, separated by a gap
-  // Max total score = 100, plotted proportionally
+  const BASE_Y = PAD_T + plotH;  // bottom of bars
+  const MAX_LSP = 55;
+  const MAX_INT = 45;
 
-  // For each month, compute bar segments
-  const getMonthData = (t: any) => {
-    const lspCats = t.cats.filter((c: any) => c.lspAvg > 0 || (c.intAvg === 0 && c.avgPts >= 0 && c.number <= 11));
-    const intCats = t.cats.filter((c: any) => c.intAvg > 0 || c.number > 11);
-    const lspTotal = t.cats.reduce((s: number, c: any) => s + c.lspAvg, 0);
-    const intTotal = t.cats.reduce((s: number, c: any) => s + c.intAvg, 0);
-    return { lspCats: t.cats.filter((c: any) => c.lspAvg > 0),
-             intCats: t.cats.filter((c: any) => c.intAvg > 0),
-             lspTotal, intTotal };
-  };
-
-  // Calculate column x centre for each month
   const colX = (mi: number) => PAD_L + mi * COL_W + COL_W / 2;
   const barLeft = (mi: number) => colX(mi) - BAR_W / 2;
 
-  // Scale: map score value to y position (higher score = higher up = lower y)
-  // Total plot height split: bottom 60% LSP, top 40% internal, with gap
-  const LSP_H = Math.round(plotH * 0.58);
-  const INT_H = Math.round(plotH * 0.38);
-  const GAP_H = plotH - LSP_H - INT_H;
+  const lspBarH = (pts: number, maxH: number) => Math.max((pts / MAX_LSP) * maxH, pts > 0 ? 2 : 0);
+  const intBarH = (pts: number, maxH: number) => Math.max((pts / MAX_INT) * maxH, pts > 0 ? 2 : 0);
 
-  // Y positions: LSP bars bottom-aligned at (PAD_T + INT_H + GAP_H + LSP_H)
-  const LSP_BASE_Y = PAD_T + INT_H + GAP_H + LSP_H;
-  const INT_BASE_Y = PAD_T + INT_H;
-
-  // Max points for LSP and internal sections
-  const MAX_LSP = 55;  // approx max LSP pts
-  const MAX_INT = 45;  // approx max internal pts
-
-  const lspBarH = (pts: number) => Math.max((pts / MAX_LSP) * LSP_H, 0);
-  const intBarH = (pts: number) => Math.max((pts / MAX_INT) * INT_H, 0);
-
-  // Centre y of a category segment within its stack (for connecting lines)
-  // LSP stack: bottom-up. Returns y-centre of segment for category cid in month mi
-  const lspSegmentCentre = (mi: number, cid: string) => {
+  // Compute segment centre Y for connecting dots
+  const segCentreY = (mi: number, cid: string, type: "lsp"|"int") => {
     const t = trend[mi];
-    const cats = t.cats.filter((c: any) => c.lspAvg > 0).sort((a: any, b: any) => a.number - b.number);
-    let cumH = 0;
+    const cats = t.cats
+      .filter((c: any) => type === "lsp" ? c.lspAvg > 0 : c.intAvg > 0)
+      .sort((a: any, b: any) => a.number - b.number);
+    let cum = 0;
     for (const c of cats) {
-      const h = lspBarH(c.lspAvg);
-      if (c.cid === cid) return LSP_BASE_Y - cumH - h / 2;
-      cumH += h;
+      const h = type === "lsp" ? lspBarH(c.lspAvg, plotH) : intBarH(c.intAvg, plotH);
+      if (c.cid === cid) return BASE_Y - cum - h / 2;
+      cum += h;
     }
     return null;
   };
 
-  const intSegmentCentre = (mi: number, cid: string) => {
-    const t = trend[mi];
-    const cats = t.cats.filter((c: any) => c.intAvg > 0).sort((a: any, b: any) => a.number - b.number);
-    let cumH = 0;
-    for (const c of cats) {
-      const h = intBarH(c.intAvg);
-      if (c.cid === cid) return INT_BASE_Y - cumH - h / 2 + INT_H; // bottom of int section
-      cumH += h;
-    }
-    return null;
+  const renderChart = (type: "lsp" | "int", title: string, subtitle: string) => {
+    const maxPts = type === "lsp" ? MAX_LSP : MAX_INT;
+    const getH = (pts: number) => type === "lsp" ? lspBarH(pts, plotH) : intBarH(pts, plotH);
+    const getAvg = (c: any) => type === "lsp" ? c.lspAvg : c.intAvg;
+
+    return (
+      <div style={{ marginBottom: 4 }}>
+        {/* Chart title */}
+        <div style={{ padding: "10px 20px 0", display: "flex", alignItems: "baseline", gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#0F1B2D" }}>{title}</span>
+          <span style={{ fontSize: 12, color: "#94A3B8" }}>{subtitle}</span>
+        </div>
+
+        <svg width={totalW} height={CHART_H} style={{ display: "block", minWidth: "100%", overflow: "visible" }}>
+          {/* Horizontal guide lines */}
+          {[0, 25, 50, 75, 100].map(pct => {
+            const y = BASE_Y - (pct / 100) * plotH;
+            return (
+              <g key={pct}>
+                <line x1={PAD_L} x2={totalW - 10} y1={y} y2={y} stroke="#F1F5F9" strokeWidth={1} />
+                <text x={PAD_L - 4} y={y + 3} textAnchor="end" fontSize={8} fill="#CBD5E1">
+                  {Math.round(pct / 100 * maxPts)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Connecting lines per category */}
+          {allCats.map((cat, ci) => {
+            const color = catColors[ci % catColors.length];
+            const points: { x: number; y: number }[] = [];
+            trend.forEach((t: any, mi: number) => {
+              const c = t.cats.find((c: any) => c.cid === cat.cid && getAvg(c) > 0);
+              if (!c) return;
+              const y = segCentreY(mi, cat.cid, type);
+              if (y !== null) points.push({ x: colX(mi), y });
+            });
+            return points.length > 1 ? points.map((pt, pi) => pi < points.length - 1 ? (
+              <line key={`${cat.cid}-${pi}`}
+                x1={pt.x} y1={pt.y} x2={points[pi + 1].x} y2={points[pi + 1].y}
+                stroke={color} strokeWidth={1.5} strokeOpacity={0.4} />
+            ) : null) : null;
+          })}
+
+          {/* Stacked bars */}
+          {trend.map((t: any, mi: number) => {
+            const cats = t.cats.filter((c: any) => getAvg(c) > 0).sort((a: any, b: any) => a.number - b.number);
+            let cum = 0;
+            const rects = cats.map((c: any) => {
+              const h = getH(getAvg(c));
+              const y = BASE_Y - cum - h;
+              cum += h;
+              const catIdx = allCats.findIndex(ac => ac.cid === c.cid);
+              return (
+                <rect key={c.cid} x={barLeft(mi)} y={y} width={BAR_W} height={h}
+                  fill={catColors[catIdx % catColors.length]} opacity={0.85} rx={1}>
+                  <title>{c.name}: {getAvg(c).toFixed(1)} / {c.weight} pts</title>
+                </rect>
+              );
+            });
+
+            // Total score label
+            const total = cats.reduce((s: number, c: any) => s + getAvg(c), 0);
+
+            return (
+              <g key={t.key}>
+                {rects}
+                {/* Dot markers on connecting lines */}
+                {allCats.map((cat, ci) => {
+                  const c = t.cats.find((c: any) => c.cid === cat.cid && getAvg(c) > 0);
+                  if (!c) return null;
+                  const y = segCentreY(mi, cat.cid, type);
+                  if (y === null) return null;
+                  return <circle key={cat.cid} cx={colX(mi)} cy={y} r={2.5}
+                    fill={catColors[ci % catColors.length]} stroke="#fff" strokeWidth={1} />;
+                })}
+                {/* Month label */}
+                <text x={colX(mi)} y={CHART_H - 4} textAnchor="middle"
+                  fontSize={10} fill="#94A3B8" fontFamily="DM Sans,sans-serif">
+                  {t.label}
+                </text>
+                {/* Section total */}
+                {total > 0 && (
+                  <text x={colX(mi)} y={BASE_Y + 13} textAnchor="middle"
+                    fontSize={9} fontWeight="700" fill="#64748B" fontFamily="DM Sans,sans-serif">
+                    {total.toFixed(1)}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    );
   };
 
   return (
-    <div style={{overflowX:"auto",padding:"16px 0 0"}}>
+    <div>
       {/* Legend */}
-      <div style={{display:"flex",gap:16,flexWrap:"wrap",padding:"0 16px 12px",borderBottom:"1px solid #F1F5F9"}}>
-        <div style={{fontSize:11,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:"0.06em",alignSelf:"center"}}>Categories:</div>
-        {allCats.map((c,i)=>(
-          <div key={c.cid} style={{display:"flex",alignItems:"center",gap:5}}>
-            <div style={{width:10,height:10,borderRadius:2,background:catColors[i%catColors.length],flexShrink:0}}/>
-            <span style={{fontSize:11,color:"#64748B"}}>{c.name}</span>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", padding: "12px 20px", borderBottom: "1px solid #F1F5F9", alignItems: "center" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.06em" }}>Categories:</span>
+        {allCats.map((c, i) => (
+          <div key={c.cid} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: catColors[i % catColors.length], flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: "#64748B" }}>{c.name}</span>
           </div>
         ))}
-        <div style={{marginLeft:"auto",display:"flex",gap:12}}>
-          <div style={{display:"flex",alignItems:"center",gap:5}}>
-            <div style={{width:20,height:8,background:"repeating-linear-gradient(135deg,#94A3B8 0,#94A3B8 2px,transparent 2px,transparent 6px)",borderRadius:2}}/>
-            <span style={{fontSize:11,color:"#64748B"}}>Internal ratings (top)</span>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:5}}>
-            <div style={{width:20,height:8,background:"#CBD5E1",borderRadius:2}}/>
-            <span style={{fontSize:11,color:"#64748B"}}>Supplier KPIs (bottom)</span>
-          </div>
-        </div>
       </div>
 
-      <svg width={totalW} height={CHART_H + 16} style={{display:"block",minWidth:"100%"}}>
-        {/* Y-axis guide lines */}
-        {[0,25,50,75,100].map(pct => {
-          const yLsp = LSP_BASE_Y - (pct/100)*LSP_H;
-          return <line key={pct} x1={PAD_L} x2={totalW-10} y1={yLsp} y2={yLsp}
-            stroke="#F1F5F9" strokeWidth={1} strokeDasharray="3,3"/>;
-        })}
+      <div style={{ overflowX: "auto" }}>
+        {/* Chart 1: Supplier KPIs */}
+        {renderChart("lsp", "Supplier KPIs", "Numeric metrics — %, counts")}
 
-        {/* Section labels */}
-        <text x={PAD_L-4} y={INT_BASE_Y + INT_H/2} textAnchor="end" fontSize={9}
-          fill="#94A3B8" transform={`rotate(-90,${PAD_L-4},${INT_BASE_Y + INT_H/2})`}>Internal</text>
-        <text x={PAD_L-4} y={LSP_BASE_Y - LSP_H/2} textAnchor="end" fontSize={9}
-          fill="#94A3B8" transform={`rotate(-90,${PAD_L-4},${LSP_BASE_Y - LSP_H/2})`}>LSP KPIs</text>
+        {/* Divider */}
+        <div style={{ height: 1, background: "#E2E8F0", margin: "4px 20px" }} />
 
-        {/* Divider line between sections */}
-        <line x1={PAD_L} x2={totalW-10}
-          y1={PAD_T + INT_H + GAP_H/2} y2={PAD_T + INT_H + GAP_H/2}
-          stroke="#E2E8F0" strokeWidth={1.5} strokeDasharray="4,3"/>
+        {/* Chart 2: Internal Ratings */}
+        {renderChart("int", "Internal Ratings", "Likert assessments")}
 
-        {/* ── Connecting lines per category (drawn under bars) ── */}
-        {allCats.map((cat, ci) => {
-          const color = catColors[ci % catColors.length];
-          // LSP connecting lines
-          const lspPoints: {x:number,y:number}[] = [];
-          const intPoints: {x:number,y:number}[] = [];
-          trend.forEach((t: any, mi: number) => {
-            const lspC = t.cats.find((c: any) => c.cid === cat.cid && c.lspAvg > 0);
-            if (lspC) {
-              const y = lspSegmentCentre(mi, cat.cid);
-              if (y !== null) lspPoints.push({ x: colX(mi), y });
-            }
-            const intC = t.cats.find((c: any) => c.cid === cat.cid && c.intAvg > 0);
-            if (intC) {
-              const cats_sorted = t.cats.filter((c: any) => c.intAvg > 0).sort((a: any, b: any) => a.number - b.number);
-              let cumH = 0;
-              for (const c of cats_sorted) {
-                const h = intBarH(c.intAvg);
-                if (c.cid === cat.cid) {
-                  intPoints.push({ x: colX(mi), y: INT_BASE_Y + INT_H - cumH - h / 2 });
-                  break;
-                }
-                cumH += h;
-              }
-            }
-          });
-          return (
-            <g key={cat.cid}>
-              {lspPoints.length > 1 && lspPoints.map((pt, pi) => pi < lspPoints.length-1 ? (
-                <line key={pi} x1={pt.x} y1={pt.y} x2={lspPoints[pi+1].x} y2={lspPoints[pi+1].y}
-                  stroke={color} strokeWidth={1.5} strokeOpacity={0.5} strokeDasharray="3,2"/>
-              ) : null)}
-              {intPoints.length > 1 && intPoints.map((pt, pi) => pi < intPoints.length-1 ? (
-                <line key={pi} x1={pt.x} y1={pt.y} x2={intPoints[pi+1].x} y2={intPoints[pi+1].y}
-                  stroke={color} strokeWidth={1.5} strokeOpacity={0.5} strokeDasharray="3,2"/>
-              ) : null)}
-            </g>
-          );
-        })}
-
-        {/* ── Bars per month ── */}
-        {trend.map((t: any, mi: number) => {
-          const bx = barLeft(mi);
-
-          // LSP stacked bar (bottom section, built bottom-up)
-          const lspCats = t.cats.filter((c: any) => c.lspAvg > 0).sort((a: any, b: any) => a.number - b.number);
-          let lspCumH = 0;
-          const lspRects = lspCats.map((c: any, ci: number) => {
-            const h = Math.max(lspBarH(c.lspAvg), 2);
-            const y = LSP_BASE_Y - lspCumH - h;
-            lspCumH += h;
-            const catIdx = allCats.findIndex(ac => ac.cid === c.cid);
-            return (
-              <rect key={c.cid} x={bx} y={y} width={BAR_W} height={h}
-                fill={catColors[catIdx % catColors.length]} opacity={0.85} rx={ci===lspCats.length-1?2:0}>
-                <title>{c.name}: {c.lspAvg}/{c.weight} pts</title>
-              </rect>
-            );
-          });
-
-          // Internal stacked bar (top section, built bottom-up from INT_BASE_Y + INT_H)
-          const intCats = t.cats.filter((c: any) => c.intAvg > 0).sort((a: any, b: any) => a.number - b.number);
-          let intCumH = 0;
-          const intRects = intCats.map((c: any, ci: number) => {
-            const h = Math.max(intBarH(c.intAvg), 2);
-            const y = (INT_BASE_Y + INT_H) - intCumH - h;
-            intCumH += h;
-            const catIdx = allCats.findIndex(ac => ac.cid === c.cid);
-            return (
-              <rect key={c.cid} x={bx} y={y} width={BAR_W} height={h}
-                fill={catColors[catIdx % catColors.length]} opacity={0.65}
-                stroke={catColors[catIdx % catColors.length]} strokeWidth={0.5}
-                strokeDasharray="2,2" rx={ci===intCats.length-1?2:0}>
-                <title>{c.name}: {c.intAvg}/{c.weight} pts (internal)</title>
-              </rect>
-            );
-          });
-
-          return (
-            <g key={t.key}>
-              {lspRects}
-              {intRects}
-              {/* Month label */}
-              <text x={colX(mi)} y={CHART_H - 4} textAnchor="middle"
-                fontSize={10} fill="#94A3B8" fontFamily="DM Sans, sans-serif">
-                {t.label}
-              </text>
-              {/* Total score below month label */}
-              <text x={colX(mi)} y={LSP_BASE_Y + 13} textAnchor="middle"
-                fontSize={10} fontWeight="700" fill={scoreColor(t.avg)} fontFamily="DM Sans, sans-serif">
-                {t.avg}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Dot markers on connecting lines */}
-        {allCats.map((cat, ci) => {
-          const color = catColors[ci % catColors.length];
-          return trend.map((t: any, mi: number) => {
-            const lspC = t.cats.find((c: any) => c.cid === cat.cid && c.lspAvg > 0);
-            if (!lspC) return null;
-            const y = lspSegmentCentre(mi, cat.cid);
-            if (y === null) return null;
-            return <circle key={`${cat.cid}-${mi}`} cx={colX(mi)} cy={y} r={3}
-              fill={color} stroke="#fff" strokeWidth={1}/>;
-          });
-        })}
-      </svg>
+        {/* Total score row */}
+        <div style={{ overflowX: "auto" }}>
+          <svg width={totalW} height={32} style={{ display: "block", minWidth: "100%" }}>
+            <line x1={PAD_L} x2={totalW - 10} y1={1} y2={1} stroke="#E2E8F0" strokeWidth={1} />
+            {trend.map((t: any, mi: number) => (
+              <g key={t.key}>
+                <text x={colX(mi)} y={21} textAnchor="middle"
+                  fontSize={12} fontWeight="800" fill={scoreColor(t.avg)}
+                  fontFamily="DM Sans,sans-serif">
+                  {t.avg}
+                </text>
+              </g>
+            ))}
+            <text x={PAD_L - 4} y={21} textAnchor="end" fontSize={9}
+              fontWeight="700" fill="#475569" fontFamily="DM Sans,sans-serif">Total</text>
+          </svg>
+        </div>
+      </div>
     </div>
   );
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT

@@ -137,28 +137,41 @@ export default function EnterRatings() {
       const periodLabel = `${FULL_MONTHS[form.month - 1]} ${form.year}`;
       const priorLabel = form.month === 1 ? `Dec ${form.year - 1}` : `${FULL_MONTHS[form.month - 2]} ${form.year}`;
 
-      // ── Fetch existing ratings for THIS month first, fall back to prior month ──
+      // ── Fetch existing ratings ───────────────────────────────────────────────
+      // Priority: (1) current month Likert values, (2) prior month Likert values
+      // Only fall back to prior month if current month has NO Likert responses at all
       let prefillValues: Record<string, number> = {};
-      // Try current month first
+
+      // Step 1: check current month for Likert responses
       const { data: curSubs } = await supabase.from("submissions").select("id")
         .eq("location_id", form.location_id)
         .eq("reporting_month", form.month)
         .eq("reporting_year", form.year);
+
+      let currentMonthHasLikert = false;
       if (curSubs?.length) {
         const { data: curResp } = await supabase.from("responses")
-          .select("metric_id,value_likert").eq("submission_id", curSubs[0].id);
-        (curResp || []).forEach(r => { if (r.value_likert !== null) prefillValues[r.metric_id] = r.value_likert; });
+          .select("metric_id,value_likert").eq("submission_id", curSubs[0].id)
+          .not("value_likert", "is", null);
+        if (curResp?.length) {
+          currentMonthHasLikert = true;
+          curResp.forEach(r => { prefillValues[r.metric_id] = r.value_likert; });
+        }
       }
-      // If no current month data, fall back to prior month
-      if (!Object.keys(prefillValues).length) {
+
+      // Step 2: only fall back to prior month if current month truly has no Likert data
+      if (!currentMonthHasLikert) {
         const pm = form.month === 1 ? 12 : form.month - 1;
         const py = form.month === 1 ? form.year - 1 : form.year;
         const { data: priorSubs } = await supabase.from("submissions").select("id")
-          .eq("location_id", form.location_id).eq("reporting_month", pm).eq("reporting_year", py);
+          .eq("location_id", form.location_id)
+          .eq("reporting_month", pm)
+          .eq("reporting_year", py);
         if (priorSubs?.length) {
           const { data: priorResp } = await supabase.from("responses")
-            .select("metric_id,value_likert").eq("submission_id", priorSubs[0].id);
-          (priorResp || []).forEach(r => { if (r.value_likert !== null) prefillValues[r.metric_id] = r.value_likert; });
+            .select("metric_id,value_likert").eq("submission_id", priorSubs[0].id)
+            .not("value_likert", "is", null);
+          (priorResp || []).forEach(r => { prefillValues[r.metric_id] = r.value_likert; });
         }
       }
 
@@ -208,54 +221,52 @@ export default function EnterRatings() {
         ]);
       });
 
-      const ws = XLSX.utils.aoa_to_sheet(rows);
+      // Build worksheet cell-by-cell for reliable styling
+      // Style definitions
+      const S = {
+        hd:      { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 }, fill: { fgColor: { rgb: "0F1B2D" } }, alignment: { horizontal: "center", vertical: "center", wrapText: false } },
+        hdScore: { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 }, fill: { fgColor: { rgb: "1A2E4A" } }, alignment: { horizontal: "center", vertical: "center" } },
+        rating:  { fill: { fgColor: { rgb: "FFFDE7" } }, alignment: { horizontal: "center", vertical: "center" } },
+        carried: { font: { bold: true, color: { rgb: "1565C0" } }, fill: { fgColor: { rgb: "DBEAFE" } }, alignment: { horizontal: "center", vertical: "center" } },
+        prior:   { font: { color: { rgb: "94A3B8" } }, fill: { fgColor: { rgb: "EFF6FF" } }, alignment: { horizontal: "center", vertical: "center" } },
+        ref:     { font: { color: { rgb: "64748B" }, sz: 10 }, fill: { fgColor: { rgb: "F8FAFC" } }, alignment: { vertical: "center", wrapText: false } },
+        s1:      { font: { color: { rgb: "92400E" }, sz: 9 }, fill: { fgColor: { rgb: "FFF7ED" } }, alignment: { wrapText: true, vertical: "top" } },
+        s2:      { font: { color: { rgb: "92400E" }, sz: 9 }, fill: { fgColor: { rgb: "FEF9C3" } }, alignment: { wrapText: true, vertical: "top" } },
+        s3:      { font: { color: { rgb: "3F6212" }, sz: 9 }, fill: { fgColor: { rgb: "F7FEE7" } }, alignment: { wrapText: true, vertical: "top" } },
+        s4:      { font: { color: { rgb: "166534" }, sz: 9 }, fill: { fgColor: { rgb: "F0FDF4" } }, alignment: { wrapText: true, vertical: "top" } },
+        s5:      { font: { color: { rgb: "1E3A5F" }, sz: 9 }, fill: { fgColor: { rgb: "EFF6FF" } }, alignment: { wrapText: true, vertical: "top" } },
+      };
+      const scoreStyles = [S.s1, S.s2, S.s3, S.s4, S.s5];
+
+      // Build ws manually from rows array
+      const ws: any = {};
+      const range = { s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: headers.length - 1 } };
+      ws["!ref"] = XLSX.utils.encode_range(range);
       ws["!cols"] = [
-        { wch: 5 },   // #
-        { wch: 28 },  // Category
-        { wch: 42 },  // Metric Name
-        { wch: 13 },  // Rating ← yellow/blue
-        { wch: 13 },  // Prior
-        { wch: 28 },  // 1
-        { wch: 28 },  // 2
-        { wch: 28 },  // 3
-        { wch: 28 },  // 4
-        { wch: 28 },  // 5
+        { wch: 5 }, { wch: 28 }, { wch: 42 },
+        { wch: 13 }, { wch: 13 },
+        { wch: 26 }, { wch: 26 }, { wch: 26 }, { wch: 26 }, { wch: 26 },
       ];
-      ws["!rows"] = rows.map((_, i) => i === 0 ? { hpt: 20 } : { hpt: 48 });
+      ws["!rows"] = rows.map((_, i) => i === 0 ? { hpt: 22 } : { hpt: 52 });
 
-      // Apply styles — requires xlsx with cellStyles support
-      const hdStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0F1B2D" } }, alignment: { horizontal: "center", vertical: "center" } };
-      const valStyle = { fill: { fgColor: { rgb: "FFFDE7" } }, alignment: { horizontal: "center", vertical: "center" } };
-      const carriedStyle = { fill: { fgColor: { rgb: "DBEAFE" } }, alignment: { horizontal: "center", vertical: "center" }, font: { bold: true, color: { rgb: "1565C0" } } };
-      const refStyle = { fill: { fgColor: { rgb: "F5F5F5" } }, font: { color: { rgb: "9E9E9E" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } };
-      const anchorHdStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 }, fill: { fgColor: { rgb: "1A2E4A" } }, alignment: { horizontal: "center", vertical: "center" } };
-      const scoreBgStyles = [
-        { fill: { fgColor: { rgb: "FFF8F0" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
-        { fill: { fgColor: { rgb: "FFF9E6" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
-        { fill: { fgColor: { rgb: "F5FFF0" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
-        { fill: { fgColor: { rgb: "F0FFF5" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
-        { fill: { fgColor: { rgb: "F0F8FF" } }, font: { color: { rgb: "475569" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } },
-      ];
-
-      headers.forEach((_, i) => {
-        const c = XLSX.utils.encode_cell({ r: 0, c: i });
-        if (ws[c]) ws[c].s = i >= 5 ? anchorHdStyle : hdStyle;
+      rows.forEach((row, r) => {
+        row.forEach((val, c) => {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          const isHeader = r === 0;
+          const isRating = c === 3;
+          const isPrior = c === 4;
+          const isScore = c >= 5;
+          const isRef = c <= 2;
+          let style;
+          if (isHeader) style = isScore ? S.hdScore : S.hd;
+          else if (isRating) style = val !== "" ? S.carried : S.rating;
+          else if (isPrior) style = S.prior;
+          else if (isRef) style = S.ref;
+          else if (isScore) style = scoreStyles[c - 5];
+          const cellType = typeof val === "number" ? "n" : "s";
+          ws[addr] = { v: val === "" ? "" : val, t: cellType, s: style };
+        });
       });
-      for (let r = 1; r < rows.length; r++) {
-        const ratingVal = rows[r][3];
-        const rCell = XLSX.utils.encode_cell({ r, c: 3 });
-        if (ws[rCell]) ws[rCell].s = ratingVal !== "" ? carriedStyle : valStyle;
-        const pCell = XLSX.utils.encode_cell({ r, c: 4 });
-        if (ws[pCell]) ws[pCell].s = { fill: { fgColor: { rgb: "EFF6FF" } }, font: { color: { rgb: "94A3B8" } }, alignment: { horizontal: "center", vertical: "center" } };
-        [0, 1, 2].forEach(c => {
-          const cell = XLSX.utils.encode_cell({ r, c });
-          if (ws[cell]) ws[cell].s = refStyle;
-        });
-        [5, 6, 7, 8, 9].forEach((c, si) => {
-          const cell = XLSX.utils.encode_cell({ r, c });
-          if (ws[cell]) ws[cell].s = scoreBgStyles[si];
-        });
-      }
       XLSX.utils.book_append_sheet(wb, ws, "Ratings Entry");
 
       // Metadata sheet

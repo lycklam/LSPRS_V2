@@ -22,6 +22,249 @@ const EMPTY_FILTERS: Filters = {
 
 const SEL = `height:36px;padding:0 10px;border:1.5px solid #CBD5E1;border-radius:7px;font-size:13px;color:#0F1B2D;background:#fff;outline:none;font-family:'DM Sans',sans-serif;appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:28px;background-image:url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394A3B8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center`;
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TREND CHART — SVG stacked bars + connecting lines per category
+// ─────────────────────────────────────────────────────────────────────────────
+function TrendChart({ trend, catColors, scoreColor, scoreBg }: any) {
+  const COL_W = 80;    // width per month column
+  const BAR_W = 52;    // bar width within column
+  const CHART_H = 220; // chart area height (px)
+  const PAD_L = 40;    // left padding for y-axis labels
+  const PAD_T = 16;
+  const PAD_B = 32;    // bottom for month labels
+  const SECTION_GAP = 8; // gap between LSP and internal stacks
+
+  const totalW = Math.max(trend.length * COL_W + PAD_L + 20, 400);
+  const plotH = CHART_H - PAD_T - PAD_B;
+
+  // Collect all unique categories across all months (sorted)
+  const allCats: any[] = [];
+  const catSeen = new Set<string>();
+  trend.forEach((t: any) => {
+    t.cats.forEach((c: any) => {
+      if (!catSeen.has(c.cid)) { catSeen.add(c.cid); allCats.push(c); }
+    });
+  });
+  allCats.sort((a, b) => a.number - b.number);
+
+  // Split into LSP categories (no intAvg) and internal categories (have intAvg)
+  // We'll show two stacked sections per month, separated by a gap
+  // Max total score = 100, plotted proportionally
+
+  // For each month, compute bar segments
+  const getMonthData = (t: any) => {
+    const lspCats = t.cats.filter((c: any) => c.lspAvg > 0 || (c.intAvg === 0 && c.avgPts >= 0 && c.number <= 11));
+    const intCats = t.cats.filter((c: any) => c.intAvg > 0 || c.number > 11);
+    const lspTotal = t.cats.reduce((s: number, c: any) => s + c.lspAvg, 0);
+    const intTotal = t.cats.reduce((s: number, c: any) => s + c.intAvg, 0);
+    return { lspCats: t.cats.filter((c: any) => c.lspAvg > 0),
+             intCats: t.cats.filter((c: any) => c.intAvg > 0),
+             lspTotal, intTotal };
+  };
+
+  // Calculate column x centre for each month
+  const colX = (mi: number) => PAD_L + mi * COL_W + COL_W / 2;
+  const barLeft = (mi: number) => colX(mi) - BAR_W / 2;
+
+  // Scale: map score value to y position (higher score = higher up = lower y)
+  // Total plot height split: bottom 60% LSP, top 40% internal, with gap
+  const LSP_H = Math.round(plotH * 0.58);
+  const INT_H = Math.round(plotH * 0.38);
+  const GAP_H = plotH - LSP_H - INT_H;
+
+  // Y positions: LSP bars bottom-aligned at (PAD_T + INT_H + GAP_H + LSP_H)
+  const LSP_BASE_Y = PAD_T + INT_H + GAP_H + LSP_H;
+  const INT_BASE_Y = PAD_T + INT_H;
+
+  // Max points for LSP and internal sections
+  const MAX_LSP = 55;  // approx max LSP pts
+  const MAX_INT = 45;  // approx max internal pts
+
+  const lspBarH = (pts: number) => Math.max((pts / MAX_LSP) * LSP_H, 0);
+  const intBarH = (pts: number) => Math.max((pts / MAX_INT) * INT_H, 0);
+
+  // Centre y of a category segment within its stack (for connecting lines)
+  // LSP stack: bottom-up. Returns y-centre of segment for category cid in month mi
+  const lspSegmentCentre = (mi: number, cid: string) => {
+    const t = trend[mi];
+    const cats = t.cats.filter((c: any) => c.lspAvg > 0).sort((a: any, b: any) => a.number - b.number);
+    let cumH = 0;
+    for (const c of cats) {
+      const h = lspBarH(c.lspAvg);
+      if (c.cid === cid) return LSP_BASE_Y - cumH - h / 2;
+      cumH += h;
+    }
+    return null;
+  };
+
+  const intSegmentCentre = (mi: number, cid: string) => {
+    const t = trend[mi];
+    const cats = t.cats.filter((c: any) => c.intAvg > 0).sort((a: any, b: any) => a.number - b.number);
+    let cumH = 0;
+    for (const c of cats) {
+      const h = intBarH(c.intAvg);
+      if (c.cid === cid) return INT_BASE_Y - cumH - h / 2 + INT_H; // bottom of int section
+      cumH += h;
+    }
+    return null;
+  };
+
+  return (
+    <div style={{overflowX:"auto",padding:"16px 0 0"}}>
+      {/* Legend */}
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",padding:"0 16px 12px",borderBottom:"1px solid #F1F5F9"}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:"0.06em",alignSelf:"center"}}>Categories:</div>
+        {allCats.map((c,i)=>(
+          <div key={c.cid} style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:10,height:10,borderRadius:2,background:catColors[i%catColors.length],flexShrink:0}}/>
+            <span style={{fontSize:11,color:"#64748B"}}>{c.name}</span>
+          </div>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",gap:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:20,height:8,background:"repeating-linear-gradient(135deg,#94A3B8 0,#94A3B8 2px,transparent 2px,transparent 6px)",borderRadius:2}}/>
+            <span style={{fontSize:11,color:"#64748B"}}>Internal ratings (top)</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:20,height:8,background:"#CBD5E1",borderRadius:2}}/>
+            <span style={{fontSize:11,color:"#64748B"}}>Supplier KPIs (bottom)</span>
+          </div>
+        </div>
+      </div>
+
+      <svg width={totalW} height={CHART_H + 16} style={{display:"block",minWidth:"100%"}}>
+        {/* Y-axis guide lines */}
+        {[0,25,50,75,100].map(pct => {
+          const yLsp = LSP_BASE_Y - (pct/100)*LSP_H;
+          return <line key={pct} x1={PAD_L} x2={totalW-10} y1={yLsp} y2={yLsp}
+            stroke="#F1F5F9" strokeWidth={1} strokeDasharray="3,3"/>;
+        })}
+
+        {/* Section labels */}
+        <text x={PAD_L-4} y={INT_BASE_Y + INT_H/2} textAnchor="end" fontSize={9}
+          fill="#94A3B8" transform={`rotate(-90,${PAD_L-4},${INT_BASE_Y + INT_H/2})`}>Internal</text>
+        <text x={PAD_L-4} y={LSP_BASE_Y - LSP_H/2} textAnchor="end" fontSize={9}
+          fill="#94A3B8" transform={`rotate(-90,${PAD_L-4},${LSP_BASE_Y - LSP_H/2})`}>LSP KPIs</text>
+
+        {/* Divider line between sections */}
+        <line x1={PAD_L} x2={totalW-10}
+          y1={PAD_T + INT_H + GAP_H/2} y2={PAD_T + INT_H + GAP_H/2}
+          stroke="#E2E8F0" strokeWidth={1.5} strokeDasharray="4,3"/>
+
+        {/* ── Connecting lines per category (drawn under bars) ── */}
+        {allCats.map((cat, ci) => {
+          const color = catColors[ci % catColors.length];
+          // LSP connecting lines
+          const lspPoints: {x:number,y:number}[] = [];
+          const intPoints: {x:number,y:number}[] = [];
+          trend.forEach((t: any, mi: number) => {
+            const lspC = t.cats.find((c: any) => c.cid === cat.cid && c.lspAvg > 0);
+            if (lspC) {
+              const y = lspSegmentCentre(mi, cat.cid);
+              if (y !== null) lspPoints.push({ x: colX(mi), y });
+            }
+            const intC = t.cats.find((c: any) => c.cid === cat.cid && c.intAvg > 0);
+            if (intC) {
+              const cats_sorted = t.cats.filter((c: any) => c.intAvg > 0).sort((a: any, b: any) => a.number - b.number);
+              let cumH = 0;
+              for (const c of cats_sorted) {
+                const h = intBarH(c.intAvg);
+                if (c.cid === cat.cid) {
+                  intPoints.push({ x: colX(mi), y: INT_BASE_Y + INT_H - cumH - h / 2 });
+                  break;
+                }
+                cumH += h;
+              }
+            }
+          });
+          return (
+            <g key={cat.cid}>
+              {lspPoints.length > 1 && lspPoints.map((pt, pi) => pi < lspPoints.length-1 ? (
+                <line key={pi} x1={pt.x} y1={pt.y} x2={lspPoints[pi+1].x} y2={lspPoints[pi+1].y}
+                  stroke={color} strokeWidth={1.5} strokeOpacity={0.5} strokeDasharray="3,2"/>
+              ) : null)}
+              {intPoints.length > 1 && intPoints.map((pt, pi) => pi < intPoints.length-1 ? (
+                <line key={pi} x1={pt.x} y1={pt.y} x2={intPoints[pi+1].x} y2={intPoints[pi+1].y}
+                  stroke={color} strokeWidth={1.5} strokeOpacity={0.5} strokeDasharray="3,2"/>
+              ) : null)}
+            </g>
+          );
+        })}
+
+        {/* ── Bars per month ── */}
+        {trend.map((t: any, mi: number) => {
+          const bx = barLeft(mi);
+
+          // LSP stacked bar (bottom section, built bottom-up)
+          const lspCats = t.cats.filter((c: any) => c.lspAvg > 0).sort((a: any, b: any) => a.number - b.number);
+          let lspCumH = 0;
+          const lspRects = lspCats.map((c: any, ci: number) => {
+            const h = Math.max(lspBarH(c.lspAvg), 2);
+            const y = LSP_BASE_Y - lspCumH - h;
+            lspCumH += h;
+            const catIdx = allCats.findIndex(ac => ac.cid === c.cid);
+            return (
+              <rect key={c.cid} x={bx} y={y} width={BAR_W} height={h}
+                fill={catColors[catIdx % catColors.length]} opacity={0.85} rx={ci===lspCats.length-1?2:0}>
+                <title>{c.name}: {c.lspAvg}/{c.weight} pts</title>
+              </rect>
+            );
+          });
+
+          // Internal stacked bar (top section, built bottom-up from INT_BASE_Y + INT_H)
+          const intCats = t.cats.filter((c: any) => c.intAvg > 0).sort((a: any, b: any) => a.number - b.number);
+          let intCumH = 0;
+          const intRects = intCats.map((c: any, ci: number) => {
+            const h = Math.max(intBarH(c.intAvg), 2);
+            const y = (INT_BASE_Y + INT_H) - intCumH - h;
+            intCumH += h;
+            const catIdx = allCats.findIndex(ac => ac.cid === c.cid);
+            return (
+              <rect key={c.cid} x={bx} y={y} width={BAR_W} height={h}
+                fill={catColors[catIdx % catColors.length]} opacity={0.65}
+                stroke={catColors[catIdx % catColors.length]} strokeWidth={0.5}
+                strokeDasharray="2,2" rx={ci===intCats.length-1?2:0}>
+                <title>{c.name}: {c.intAvg}/{c.weight} pts (internal)</title>
+              </rect>
+            );
+          });
+
+          return (
+            <g key={t.key}>
+              {lspRects}
+              {intRects}
+              {/* Month label */}
+              <text x={colX(mi)} y={CHART_H - 4} textAnchor="middle"
+                fontSize={10} fill="#94A3B8" fontFamily="DM Sans, sans-serif">
+                {t.label}
+              </text>
+              {/* Total score below month label */}
+              <text x={colX(mi)} y={LSP_BASE_Y + 13} textAnchor="middle"
+                fontSize={10} fontWeight="700" fill={scoreColor(t.avg)} fontFamily="DM Sans, sans-serif">
+                {t.avg}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Dot markers on connecting lines */}
+        {allCats.map((cat, ci) => {
+          const color = catColors[ci % catColors.length];
+          return trend.map((t: any, mi: number) => {
+            const lspC = t.cats.find((c: any) => c.cid === cat.cid && c.lspAvg > 0);
+            if (!lspC) return null;
+            const y = lspSegmentCentre(mi, cat.cid);
+            if (y === null) return null;
+            return <circle key={`${cat.cid}-${mi}`} cx={colX(mi)} cy={y} r={3}
+              fill={color} stroke="#fff" strokeWidth={1}/>;
+          });
+        })}
+      </svg>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,25 +421,57 @@ export default function ReportingDashboard() {
 
   // Trend: monthly avg overall score
   const trendData = () => {
-    const map: Record<string, number[]> = {};
+    // Map: month-key → { overall scores, per-category { lsp pts, internal pts, weight } }
+    const map: Record<string, {
+      scores: number[];
+      count: number;
+      cats: Record<string, { lspPts: number[]; intPts: number[]; weight: number; name: string; number: number }>;
+    }> = {};
+
     submissions.forEach(sub => {
       const score = scoreFor(sub.id);
       if (!score) return;
       const key = `${sub.reporting_year}-${String(sub.reporting_month).padStart(2,"0")}`;
-      if (!map[key]) map[key] = [];
-      map[key].push(Number(score.total_score));
+      if (!map[key]) map[key] = { scores: [], count: 0, cats: {} };
+      map[key].scores.push(Number(score.total_score));
+      map[key].count++;
+
+      // Per-category scores for this submission
+      const subCatScores = categoryScores.filter(cs => cs.submission_id === sub.id);
+      subCatScores.forEach(cs => {
+        const cid = cs.category_id;
+        const cat = cs.categories;
+        if (!map[key].cats[cid]) map[key].cats[cid] = {
+          lspPts: [], intPts: [], weight: Number(cat?.weight_pct || 0),
+          name: cat?.name || cid, number: Number(cat?.number || 0),
+        };
+        // Split: internal categories are those with Likert responses
+        const subResponses = responses.filter(r => r.submission_id === sub.id && r.metrics?.category_id === cid);
+        const hasLikert = subResponses.some(r => r.value_likert !== null && r.value_likert !== undefined);
+        const pts = Number(cs.normalized_score || 0);
+        if (hasLikert) map[key].cats[cid].intPts.push(pts);
+        else map[key].cats[cid].lspPts.push(pts);
+      });
     });
+
     return Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, scores]) => {
+      .map(([key, v]) => {
         const [year, month] = key.split("-");
+        const avg = v.scores.length ? Math.round((v.scores.reduce((a, b) => a + b, 0) / v.scores.length) * 10) / 10 : 0;
+        const avgCats = Object.entries(v.cats).map(([cid, c]) => {
+          const allPts = [...c.lspPts, ...c.intPts];
+          const avgPts = allPts.length ? Math.round((allPts.reduce((a,b)=>a+b,0)/allPts.length)*10)/10 : 0;
+          const lspAvg = c.lspPts.length ? Math.round((c.lspPts.reduce((a,b)=>a+b,0)/c.lspPts.length)*10)/10 : 0;
+          const intAvg = c.intPts.length ? Math.round((c.intPts.reduce((a,b)=>a+b,0)/c.intPts.length)*10)/10 : 0;
+          const pct = c.weight > 0 ? Math.round((avgPts / c.weight) * 100) : 0;
+          return { cid, name: c.name, number: c.number, weight: c.weight, avgPts, lspAvg, intAvg, pct };
+        }).sort((a,b) => a.number - b.number);
         return {
-          key,
-          label: `${SHORT_MONTHS[Number(month)]} ${year}`,
-          avg: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10,
-          count: scores.length,
-          min: Math.min(...scores),
-          max: Math.max(...scores),
+          key, label: `${SHORT_MONTHS[Number(month)]} ${year}`,
+          avg, count: v.count,
+          min: Math.min(...v.scores), max: Math.max(...v.scores),
+          cats: avgCats,
         };
       });
   };
@@ -435,40 +710,22 @@ export default function ReportingDashboard() {
             <div className="rd-card">
               <div className="rd-card-hdr">
                 <div>
-                  <div className="rd-card-title">Score Trend</div>
-                  <div className="rd-card-sub">Monthly average overall score across all locations</div>
+                  <div className="rd-card-title">Score Trend — Category Breakdown</div>
+                  <div className="rd-card-sub">Stacked bars per month split by supplier KPIs (bottom) and internal ratings (top) · Lines connect each category across months</div>
                 </div>
               </div>
               {trend.length===0 ? <div className="rd-empty">No scored submissions in this period</div> : (
-                <div className="rd-trend-wrap">
-                  <div className="rd-trend-chart">
-                    {trend.map((t,i)=>{
-                      const pct = t.avg / 100;
-                      const color = scoreColor(t.avg);
-                      return (
-                        <div key={t.key} className="rd-trend-col">
-                          <div className="rd-trend-bar-val" style={{color}}>{t.avg}</div>
-                          <div className="rd-trend-bar-wrap">
-                            <div className="rd-trend-bar" style={{height:`${Math.max(pct*100,4)}%`,background:color,opacity:0.85}} title={`${t.label}: ${t.avg}/100 (${t.count} submissions)`} />
-                          </div>
-                          <div className="rd-trend-label">{t.label}</div>
-                          <div className="rd-trend-count">{t.count} sub{t.count!==1?"s":""}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                <TrendChart trend={trend} catColors={CAT_COLORS} scoreColor={scoreColor} scoreBg={scoreBg} />
               )}
-              {/* Monthly breakdown table */}
+              {/* Summary table */}
               {trend.length>0 && (
                 <table className="rd-table" style={{borderTop:"1px solid #F1F5F9"}}>
                   <thead><tr>
                     <th>Month</th>
-                    <th className="right">Avg Score</th>
+                    <th className="right">Total Score</th>
                     <th className="right">Min</th>
                     <th className="right">Max</th>
                     <th className="right">Submissions</th>
-                    <th className="rd-bar-cell"></th>
                   </tr></thead>
                   <tbody>
                     {trend.map(t=>(
@@ -478,9 +735,6 @@ export default function ReportingDashboard() {
                         <td className="right" style={{color:"#64748B"}}>{t.min}</td>
                         <td className="right" style={{color:"#64748B"}}>{t.max}</td>
                         <td className="right" style={{color:"#64748B"}}>{t.count}</td>
-                        <td className="rd-bar-cell">
-                          <div className="rd-bar-bg"><div className="rd-bar-fill" style={{width:`${t.avg}%`,background:scoreColor(t.avg)}}/></div>
-                        </td>
                       </tr>
                     ))}
                   </tbody>

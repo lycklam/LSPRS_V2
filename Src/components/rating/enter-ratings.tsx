@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase, FULL_MONTHS, CAT_COLORS } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
+import * as XLSX from "xlsx/dist/xlsx.full.min.js";
 
 const SEL = `height:38px;padding:0 12px;border:1.5px solid #CBD5E1;border-radius:8px;font-size:14px;color:#0F1B2D;background:#fff;outline:none;transition:border-color 0.15s,box-shadow 0.15s;font-family:'DM Sans',sans-serif;width:100%;appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394A3B8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center`;
 const INP = `height:38px;padding:0 12px;border:1.5px solid #CBD5E1;border-radius:8px;font-size:14px;color:#0F1B2D;background:#fff;outline:none;transition:border-color 0.15s,box-shadow 0.15s;font-family:'DM Sans',sans-serif;width:100%`;
@@ -18,6 +19,14 @@ export default function EnterRatings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const { toast } = useToast();
+
+  // Excel upload/download state
+  const [xlDownloading, setXlDownloading] = useState(false);
+  const [xlUploading, setXlUploading] = useState(false);
+  const [xlPreview, setXlPreview] = useState<any[]>([]);
+  const [xlResult, setXlResult] = useState<any>(null);
+  const [xlError, setXlError] = useState("");
+  const xlFileRef = useRef<HTMLInputElement>(null);
 
   const now = new Date();
   const [form, setForm] = useState({
@@ -117,6 +126,190 @@ export default function EnterRatings() {
     setSaving(false);
   };
 
+  // ── Excel: Download internal ratings template ─────────────────────────────
+  const downloadInternalTemplate = async () => {
+    if (!form.location_id) return;
+    setXlDownloading(true);
+    try {
+      const sup = suppliers.find(s => s.id === form.supplier_id);
+      const loc = locations.find(l => l.id === form.location_id);
+      const country = countries.find(c => c.id === form.country_id);
+      const periodLabel = `${FULL_MONTHS[form.month - 1]} ${form.year}`;
+      const priorLabel = form.month === 1 ? `Dec ${form.year - 1}` : `${FULL_MONTHS[form.month - 2]} ${form.year}`;
+
+      const wb = XLSX.utils.book_new();
+
+      // Instructions sheet
+      const instrWs = XLSX.utils.aoa_to_sheet([
+        ["LSP SCORECARD — INTERNAL RATINGS TEMPLATE"],
+        [""],
+        ["Supplier:", sup?.name || ""], ["Location:", loc?.name || ""],
+        ["Country:", country?.country_name || ""], ["Period:", periodLabel],
+        ["Reviewer:", form.reviewer || ""],
+        [""],
+        ["INSTRUCTIONS"],
+        ["1. Fill in the RATING column (column D) for each metric — enter a number from 1 to 5"],
+        ["2. Reference descriptions in columns E–F show what each score range means"],
+        ["3. Blue pre-filled ratings are carried forward from last month — review and change if needed"],
+        ["4. Do NOT change metric names, numbers or column structure"],
+        ["5. Save and upload back via Enter Ratings → Excel tab"],
+        [""], ["SCALE: 1 = Lowest  |  5 = Highest"],
+      ]);
+      instrWs["!cols"] = [{ wch: 22 }, { wch: 60 }];
+      XLSX.utils.book_append_sheet(wb, instrWs, "Instructions");
+
+      // Ratings sheet — columns: #, Category, Metric, Rating, Low description, High description
+      const headers = ["#", "Category", "Metric Name", "Rating (1-5)", `Prior (${priorLabel})`, "Score 1 means…", "Score 5 means…"];
+      const rows = [headers];
+      metrics.forEach(m => {
+        const prior = prevValues[m.id] ?? "";
+        const mAnchors = anchors
+          .filter(a => a.metric_id === m.id)
+          .sort((a, b) => a.score - b.score)
+          .filter((a, i, arr) => i === arr.findIndex(x => x.score === a.score));
+        const low = mAnchors.find(a => a.score === 1);
+        const high = mAnchors.find(a => a.score === 5);
+        rows.push([
+          m.number,
+          m.categories?.name || "",
+          m.name,
+          prior !== "" ? prior : "",
+          prior !== "" ? prior : "",
+          low?.description || low?.label || "",
+          high?.description || high?.label || "",
+        ]);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 5 }, { wch: 30 }, { wch: 45 }, { wch: 14 }, { wch: 14 }, { wch: 40 }, { wch: 40 }];
+
+      const hdStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0F1B2D" } } };
+      const valStyle = { fill: { fgColor: { rgb: "FFFDE7" } }, alignment: { horizontal: "center" } };
+      const carriedStyle = { fill: { fgColor: { rgb: "E3F2FD" } }, alignment: { horizontal: "center" }, font: { bold: true, color: { rgb: "1565C0" } } };
+      const refStyle = { fill: { fgColor: { rgb: "F5F5F5" } }, font: { color: { rgb: "9E9E9E" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } };
+
+      headers.forEach((_, i) => {
+        const c = XLSX.utils.encode_cell({ r: 0, c: i });
+        if (ws[c]) ws[c].s = hdStyle;
+      });
+      for (let r = 1; r < rows.length; r++) {
+        const ratingVal = rows[r][3];
+        const rCell = XLSX.utils.encode_cell({ r, c: 3 });
+        if (ws[rCell]) ws[rCell].s = ratingVal !== "" ? carriedStyle : valStyle;
+        const pCell = XLSX.utils.encode_cell({ r, c: 4 });
+        if (ws[pCell]) ws[pCell].s = { fill: { fgColor: { rgb: "E3F2FD" } }, font: { color: { rgb: "9E9E9E" } }, alignment: { horizontal: "center" } };
+        [0, 1, 2, 5, 6].forEach(c => {
+          const cell = XLSX.utils.encode_cell({ r, c });
+          if (ws[cell]) ws[cell].s = refStyle;
+        });
+      }
+      XLSX.utils.book_append_sheet(wb, ws, "Ratings Entry");
+
+      // Metadata sheet
+      const metaWs = XLSX.utils.aoa_to_sheet([
+        ["METADATA — DO NOT EDIT"],
+        ["template_type", "internal"],
+        ["supplier_id", form.supplier_id],
+        ["location_id", form.location_id],
+        ["country_id", form.country_id],
+        ["reporting_month", form.month],
+        ["reporting_year", form.year],
+        ["reviewer", form.reviewer || ""],
+        ["generated_at", new Date().toISOString()],
+        ["metric_ids", metrics.map(m => m.id).join(",")],
+        ["metric_numbers", metrics.map(m => m.number).join(",")],
+      ]);
+      XLSX.utils.book_append_sheet(wb, metaWs, "_meta");
+
+      const fn = `Internal_Ratings_${sup?.name?.replace(/\s+/g, "_")}_${loc?.name?.replace(/\s+/g, "_")}_${FULL_MONTHS[form.month - 1]}_${form.year}.xlsx`;
+      XLSX.writeFile(wb, fn);
+    } catch (e) { console.error(e); }
+    setXlDownloading(false);
+  };
+
+  // ── Excel: Upload internal ratings ────────────────────────────────────────
+  const handleXlFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setXlError(""); setXlResult(null); setXlPreview([]);
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const metaWs = wb.Sheets["_meta"];
+      if (!metaWs) { setXlError("Invalid template — metadata sheet missing."); return; }
+      const metaRows = XLSX.utils.sheet_to_json(metaWs, { header: 1 });
+      const meta = {};
+      metaRows.slice(1).forEach(row => { if (row[0] && row[1] !== undefined) meta[row[0]] = String(row[1]); });
+
+      if (meta["template_type"] !== "internal") { setXlError("Wrong template type — please upload an Internal Ratings template."); return; }
+      const supplierId = meta["supplier_id"], locationId = meta["location_id"];
+      const countryId = meta["country_id"], month = Number(meta["reporting_month"]);
+      const year = Number(meta["reporting_year"]), reviewer = meta["reviewer"] || form.reviewer || "Excel upload";
+      const metricIds = meta["metric_ids"]?.split(",") || [];
+      const metricNumbers = meta["metric_numbers"]?.split(",").map(Number) || [];
+
+      if (!supplierId || !locationId || !month || !year) { setXlError("Metadata incomplete. Download a fresh template."); return; }
+
+      const dataWs = wb.Sheets["Ratings Entry"];
+      if (!dataWs) { setXlError("Ratings Entry sheet not found."); return; }
+      const rows = XLSX.utils.sheet_to_json(dataWs, { header: 1 });
+      const parsed = [];
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const metricNumber = Number(row[0]);
+        const metricName = String(row[2] || "");
+        const ratingRaw = row[3];
+        const idx = metricNumbers.indexOf(metricNumber);
+        if (idx === -1 || isNaN(metricNumber)) continue;
+        const value = ratingRaw !== null && ratingRaw !== undefined && ratingRaw !== "" ? Number(ratingRaw) : null;
+        if (value !== null && (value < 1 || value > 5 || !Number.isInteger(value))) continue;
+        parsed.push({ metric_id: metricIds[idx], metric_number: metricNumber, metric_name: metricName, value });
+      }
+      const filled = parsed.filter(p => p.value !== null);
+      if (!filled.length) { setXlError("No ratings found. Fill in the Rating column (1-5)."); return; }
+      setXlPreview(parsed);
+      setXlResult({ supplierId, locationId, countryId, month, year, reviewer, parsed, filled });
+    } catch (e) { setXlError(`Failed to read file: ${e.message}`); }
+    if (xlFileRef.current) xlFileRef.current.value = "";
+  };
+
+  const confirmXlUpload = async () => {
+    if (!xlResult) return;
+    setXlUploading(true);
+    try {
+      const { supplierId, locationId, countryId, month, year, reviewer, filled } = xlResult;
+      const { data: existing } = await supabase.from("submissions").select("id")
+        .eq("location_id", locationId).eq("reporting_month", month).eq("reporting_year", year);
+      let subId;
+      if (existing?.length) {
+        subId = existing[0].id;
+        const intIds = new Set(filled.map(f => f.metric_id));
+        const { data: existingResp } = await supabase.from("responses").select("id,metric_id").eq("submission_id", subId);
+        const toDelete = (existingResp || []).filter(r => intIds.has(r.metric_id)).map(r => r.id);
+        if (toDelete.length) await supabase.from("responses").delete().in("id", toDelete);
+        await supabase.from("submissions").update({ reviewed_by: reviewer, reviewed_at: new Date().toISOString() }).eq("id", subId);
+      } else {
+        const { data: newSub, error } = await supabase.from("submissions").insert({
+          location_id: locationId, supplier_id: supplierId, country_id: countryId,
+          reporting_month: month, reporting_year: year,
+          reviewed_by: reviewer, reviewed_at: new Date().toISOString(), status: "draft"
+        }).select("id");
+        if (error) throw error;
+        subId = newSub[0].id;
+      }
+      for (const f of filled) {
+        const { data: ex } = await supabase.from("responses").select("id").eq("submission_id", subId).eq("metric_id", f.metric_id);
+        if (ex?.length) await supabase.from("responses").update({ value_likert: f.value, entered_by: reviewer }).eq("id", ex[0].id);
+        else await supabase.from("responses").insert({ submission_id: subId, metric_id: f.metric_id, value_likert: f.value, entered_by: reviewer });
+      }
+      setXlResult({ ...xlResult, success: true, filledCount: filled.length, month, year });
+      setXlPreview([]);
+      toast({ title: `${filled.length} ratings saved via Excel upload` });
+    } catch (e) { setXlError(`Upload failed: ${e.message}`); }
+    setXlUploading(false);
+  };
+
+
   if (saved) return (
     <div style={{ maxWidth: 480, margin: "40px auto", textAlign: "center" }}>
       <div style={{ width: 64, height: 64, background: "#DCFCE7", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
@@ -173,14 +366,10 @@ export default function EnterRatings() {
         .er-lbtn.sel{border-color:#2563EB;background:#2563EB;color:#fff}
         .er-lbtn.carried-val{border-color:#93C5FD;background:#EFF6FF}
         /* FIX: Score number — smaller and tighter */
-        .er-lbtn-score{font-size:15px;font-weight:800;line-height:1;margin-bottom:4px}
-        /* FIX: Label row */
-        .er-lbtn-label{font-size:10px;font-weight:700;line-height:1.2;color:#475569}
-        .er-lbtn.sel .er-lbtn-label{color:rgba(255,255,255,0.9)}
-        .er-lbtn.carried-val .er-lbtn-label{color:#1D4ED8}
-        /* FIX: Description row — always visible */
-        .er-lbtn-desc{font-size:10px;line-height:1.3;color:#94A3B8;margin-top:3px}
-        .er-lbtn.sel .er-lbtn-desc{color:rgba(255,255,255,0.7)}
+        .er-lbtn-score{font-size:15px;font-weight:800;line-height:1;margin-bottom:5px}
+        .er-lbtn-desc{font-size:9.5px;line-height:1.35;color:#64748B;margin-top:0}
+        .er-lbtn.sel .er-lbtn-desc{color:rgba(255,255,255,0.85)}
+        .er-lbtn.carried-val .er-lbtn-desc{color:#1D4ED8}
 
         .er-confirm{background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:20px}
         .er-confirm h3{font-size:14px;font-weight:700;color:#15803D;margin:0 0 12px}
@@ -191,6 +380,25 @@ export default function EnterRatings() {
         .er-save-btn:hover{background:#047857}
         .er-save-btn:disabled{background:#6EE7B7;cursor:not-allowed}
         .er-prev-note{font-size:11.5px;color:#94A3B8;margin-top:3px}
+        /* Excel section */
+        .er-excel-card{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(15,27,45,0.06)}
+        .er-excel-title{font-size:15px;font-weight:700;color:#0F1B2D;margin:0 0 4px}
+        .er-excel-sub{font-size:13px;color:#64748B;margin:0 0 18px}
+        .er-excel-divider{border:none;border-top:2px dashed #E2E8F0;margin:8px 0 20px}
+        .er-excel-btn{height:40px;padding:0 20px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:"DM Sans",sans-serif;display:flex;align-items:center;gap:8px}
+        .er-excel-btn:hover{background:#047857}
+        .er-excel-btn:disabled{opacity:0.5;cursor:not-allowed}
+        .er-upload-zone{border:2px dashed #CBD5E1;border-radius:10px;padding:24px;text-align:center;cursor:pointer;background:#FAFBFC;transition:all 0.2s}
+        .er-upload-zone:hover{border-color:#059669;background:#F0FDF4}
+        .er-preview-tbl{width:100%;border-collapse:collapse}
+        .er-preview-tbl thead th{background:#F8FAFC;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#64748B;padding:8px 14px;border-bottom:1px solid #E2E8F0;text-align:left}
+        .er-preview-tbl thead th.r{text-align:right}
+        .er-preview-tbl tbody tr{border-bottom:1px solid #F8FAFC}
+        .er-preview-tbl td{padding:9px 14px;font-size:13px;color:#334155}
+        .er-preview-tbl td.v{text-align:right;font-weight:700;color:#059669}
+        .er-preview-tbl td.e{text-align:right;color:#CBD5E1;font-style:italic}
+        .er-excel-success{background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:20px;text-align:center}
+        .er-excel-error{background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px 16px;font-size:13px;color:#B91C1C;font-weight:500}
       `}</style>
 
       {/* Supplier & Period */}
@@ -273,7 +481,7 @@ export default function EnterRatings() {
                         <span className="er-score-num" style={{ color: val ? "#0F1B2D" : "#CBD5E1" }}>{val ?? "—"}</span>
                         <span className="er-score-denom">/5</span>
                       </div>
-                      {selAnchor && <div className="er-score-label">{selAnchor.label}</div>}
+                      
                     </div>
                   </div>
 
@@ -293,7 +501,6 @@ export default function EnterRatings() {
                           onClick={() => setValues({ ...values, [m.id]: anchor.score })}
                         >
                           <div className="er-lbtn-score">{anchor.score}</div>
-                          <div className="er-lbtn-label">{anchor.label}</div>
                           {desc && <div className="er-lbtn-desc">{desc}</div>}
                         </button>
                       );
@@ -316,6 +523,90 @@ export default function EnterRatings() {
           </button>
         </div>
       </>}
+
+      {/* ── Excel Template Section ──────────────────────────────────── */}
+      <div style={{borderTop:"2px dashed #E2E8F0",paddingTop:20,marginTop:4}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:16}}>
+          Excel Template — Alternative Entry Method
+        </div>
+
+        {/* Download */}
+        <div className="er-excel-card" style={{marginBottom:16}}>
+          <div className="er-excel-title">Download Ratings Template</div>
+          <div className="er-excel-sub">
+            Pre-filled with last month's carry-forward values (blue). Fill in the Rating column (1–5) and upload below.
+          </div>
+          {form.location_id ? (
+            <button className="er-excel-btn" onClick={downloadInternalTemplate} disabled={xlDownloading}>
+              {xlDownloading ? "Generating…" : (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M5 7l3 3 3-3M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Download Ratings Template
+                </>
+              )}
+            </button>
+          ) : (
+            <div style={{fontSize:13,color:"#94A3B8"}}>Select supplier, location and period above first.</div>
+          )}
+        </div>
+
+        {/* Upload */}
+        <div className="er-excel-card">
+          <div className="er-excel-title">Upload Filled Template</div>
+          <div className="er-excel-sub">Upload your completed ratings file. Ratings are saved and merged with any existing LSP data.</div>
+
+          {xlResult?.success ? (
+            <div className="er-excel-success">
+              <div style={{fontSize:28,marginBottom:8}}>✅</div>
+              <div style={{fontSize:15,fontWeight:700,color:"#0F1B2D",marginBottom:4}}>Ratings uploaded</div>
+              <div style={{fontSize:13,color:"#64748B",marginBottom:14}}>{xlResult.filledCount} ratings saved for {FULL_MONTHS[xlResult.month-1]} {xlResult.year}</div>
+              <button style={{height:36,padding:"0 16px",background:"#fff",color:"#475569",border:"1.5px solid #E2E8F0",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                onClick={()=>{setXlResult(null);setXlPreview([]);setXlError("");}}>Upload Another</button>
+            </div>
+          ) : xlPreview.length > 0 ? (
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#1D4ED8"}}>
+                <strong>{xlPreview.filter(r=>r.value!==null).length} of {xlPreview.length} ratings filled.</strong> Review and confirm.
+              </div>
+              <div style={{overflow:"auto",maxHeight:260,border:"1px solid #E2E8F0",borderRadius:8}}>
+                <table className="er-preview-tbl">
+                  <thead><tr><th>#</th><th>Metric</th><th className="r">Rating</th></tr></thead>
+                  <tbody>
+                    {xlPreview.map(r=>(
+                      <tr key={r.metric_id}>
+                        <td style={{width:32,fontWeight:600,color:"#0F1B2D"}}>{r.metric_number}</td>
+                        <td>{r.metric_name}</td>
+                        {r.value!==null ? <td className="v">{r.value}/5</td> : <td className="e">not filled</td>}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {xlError && <div className="er-excel-error">⚠ {xlError}</div>}
+              <div style={{display:"flex",gap:10}}>
+                <button style={{height:40,padding:"0 20px",background:"#059669",color:"#fff",border:"none",borderRadius:8,fontSize:13.5,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                  onClick={confirmXlUpload} disabled={xlUploading}>
+                  {xlUploading ? "Saving…" : `✓ Save ${xlPreview.filter(r=>r.value!==null).length} ratings`}
+                </button>
+                <button style={{height:40,padding:"0 16px",background:"#fff",color:"#475569",border:"1.5px solid #E2E8F0",borderRadius:8,fontSize:13.5,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                  onClick={()=>{setXlPreview([]);setXlResult(null);setXlError("");}}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {xlError && <div className="er-excel-error" style={{marginBottom:12}}>⚠ {xlError}</div>}
+              <div className="er-upload-zone" onClick={()=>xlFileRef.current?.click()}>
+                <svg width="28" height="28" viewBox="0 0 32 32" fill="none" style={{margin:"0 auto 8px"}}><path d="M16 4v16M10 14l6-6 6 6M6 24h20" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <div style={{fontSize:14,fontWeight:600,color:"#0F1B2D",marginBottom:4}}>Drop Excel file here</div>
+                <div style={{fontSize:12.5,color:"#64748B",marginBottom:10}}>.xlsx files only</div>
+                <button style={{height:34,padding:"0 14px",background:"#fff",color:"#059669",border:"1.5px solid #BBF7D0",borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                  onClick={e=>{e.stopPropagation();xlFileRef.current?.click();}}>Browse Files</button>
+              </div>
+              <input ref={xlFileRef} type="file" accept=".xlsx" style={{display:"none"}} onChange={handleXlFile}/>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

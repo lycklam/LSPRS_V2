@@ -159,7 +159,8 @@ export default function EnterRatings() {
       XLSX.utils.book_append_sheet(wb, instrWs, "Instructions");
 
       // Ratings sheet — columns: #, Category, Metric, Rating, Low description, High description
-      const headers = ["#", "Category", "Metric Name", "Rating (1-5)", `Prior (${priorLabel})`, "Score 1 means…", "Score 5 means…"];
+      // Columns: #, Category, Metric Name, Rating (1-5), Prior, 1, 2, 3, 4, 5
+      const headers = ["#", "Category", "Metric Name", "Rating (1-5)", `Prior (${priorLabel})`, "1", "2", "3", "4", "5"];
       const rows = [headers];
       metrics.forEach(m => {
         const prior = prevValues[m.id] ?? "";
@@ -167,40 +168,66 @@ export default function EnterRatings() {
           .filter(a => a.metric_id === m.id)
           .sort((a, b) => a.score - b.score)
           .filter((a, i, arr) => i === arr.findIndex(x => x.score === a.score));
-        const low = mAnchors.find(a => a.score === 1);
-        const high = mAnchors.find(a => a.score === 5);
+        // One description cell per score level
+        const anchorDesc = [1,2,3,4,5].map(score => {
+          const a = mAnchors.find(x => x.score === score);
+          return a ? (a.description || a.label || "") : "";
+        });
         rows.push([
           m.number,
           m.categories?.name || "",
           m.name,
           prior !== "" ? prior : "",
           prior !== "" ? prior : "",
-          low?.description || low?.label || "",
-          high?.description || high?.label || "",
+          ...anchorDesc,
         ]);
       });
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws["!cols"] = [{ wch: 5 }, { wch: 30 }, { wch: 45 }, { wch: 14 }, { wch: 14 }, { wch: 40 }, { wch: 40 }];
+      ws["!cols"] = [
+        { wch: 5 },   // #
+        { wch: 28 },  // Category
+        { wch: 42 },  // Metric Name
+        { wch: 13 },  // Rating ← yellow/blue
+        { wch: 13 },  // Prior
+        { wch: 28 },  // 1
+        { wch: 28 },  // 2
+        { wch: 28 },  // 3
+        { wch: 28 },  // 4
+        { wch: 28 },  // 5
+      ];
+      ws["!rows"] = rows.map((_, i) => i === 0 ? { hpt: 20 } : { hpt: 48 });
 
-      const hdStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0F1B2D" } } };
-      const valStyle = { fill: { fgColor: { rgb: "FFFDE7" } }, alignment: { horizontal: "center" } };
-      const carriedStyle = { fill: { fgColor: { rgb: "E3F2FD" } }, alignment: { horizontal: "center" }, font: { bold: true, color: { rgb: "1565C0" } } };
+      const hdStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0F1B2D" } }, alignment: { horizontal: "center", vertical: "center" } };
+      const valStyle = { fill: { fgColor: { rgb: "FFFDE7" } }, alignment: { horizontal: "center", vertical: "center" } };
+      const carriedStyle = { fill: { fgColor: { rgb: "E3F2FD" } }, alignment: { horizontal: "center", vertical: "center" }, font: { bold: true, color: { rgb: "1565C0" } } };
       const refStyle = { fill: { fgColor: { rgb: "F5F5F5" } }, font: { color: { rgb: "9E9E9E" }, sz: 9 }, alignment: { wrapText: true, vertical: "top" } };
+      const anchorHdStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 }, fill: { fgColor: { rgb: "1A2E4A" } }, alignment: { horizontal: "center", vertical: "center" } };
 
       headers.forEach((_, i) => {
         const c = XLSX.utils.encode_cell({ r: 0, c: i });
-        if (ws[c]) ws[c].s = hdStyle;
+        if (ws[c]) ws[c].s = i >= 5 ? anchorHdStyle : hdStyle;
       });
       for (let r = 1; r < rows.length; r++) {
         const ratingVal = rows[r][3];
         const rCell = XLSX.utils.encode_cell({ r, c: 3 });
         if (ws[rCell]) ws[rCell].s = ratingVal !== "" ? carriedStyle : valStyle;
         const pCell = XLSX.utils.encode_cell({ r, c: 4 });
-        if (ws[pCell]) ws[pCell].s = { fill: { fgColor: { rgb: "E3F2FD" } }, font: { color: { rgb: "9E9E9E" } }, alignment: { horizontal: "center" } };
-        [0, 1, 2, 5, 6].forEach(c => {
+        if (ws[pCell]) ws[pCell].s = { fill: { fgColor: { rgb: "F1F5F9" } }, font: { color: { rgb: "94A3B8" } }, alignment: { horizontal: "center", vertical: "center" } };
+        // Ref columns: #, Category, Metric Name
+        [0, 1, 2].forEach(c => {
           const cell = XLSX.utils.encode_cell({ r, c });
           if (ws[cell]) ws[cell].s = refStyle;
+        });
+        // Score description columns: alternating light tint per score
+        const scoreBgs = ["FFF8F0","FFFBF0","F8FFF0","F0FFF8","F0F8FF"];
+        [5,6,7,8,9].forEach((c, si) => {
+          const cell = XLSX.utils.encode_cell({ r, c });
+          if (ws[cell]) ws[cell].s = {
+            fill: { fgColor: { rgb: scoreBgs[si] } },
+            font: { color: { rgb: "475569" }, sz: 9 },
+            alignment: { wrapText: true, vertical: "top" }
+          };
         });
       }
       XLSX.utils.book_append_sheet(wb, ws, "Ratings Entry");

@@ -72,6 +72,15 @@ export default function ExcelTemplate() {
 
   const getPriorNumericValues = async () => {
     if (!form.location_id) return {};
+    // Try current month first, fall back to prior month
+    const { data: curSubs } = await supabase.from("submissions").select("id")
+      .eq("location_id", form.location_id).eq("reporting_month", form.month).eq("reporting_year", form.year);
+    if (curSubs?.length) {
+      const { data: resp } = await supabase.from("responses").select("metric_id,value_numeric").eq("submission_id", curSubs[0].id);
+      const map: Record<string, number> = {};
+      (resp || []).forEach(r => { if (r.value_numeric !== null) map[r.metric_id] = r.value_numeric; });
+      if (Object.keys(map).length) return map;
+    }
     const pm = form.month === 1 ? 12 : form.month - 1;
     const py = form.month === 1 ? form.year - 1 : form.year;
     const { data: subs } = await supabase.from("submissions").select("id")
@@ -191,7 +200,7 @@ export default function ExcelTemplate() {
       XLSX.utils.book_append_sheet(wb, metaWs, "_meta");
 
       const filename = `LSP_KPI_${sup?.name?.replace(/\s+/g, "_")}_${loc?.name?.replace(/\s+/g, "_")}_${FULL_MONTHS[form.month - 1]}_${form.year}.xlsx`;
-      XLSX.writeFile(wb, filename);
+      XLSX.writeFile(wb, filename, { cellStyles: true });
     } catch (e: any) { console.error("Download error:", e); }
     setDownloading(false);
   };

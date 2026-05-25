@@ -124,11 +124,29 @@ function TrendChart({ trend, catColors, scoreColor, scoreBg }: any) {
               const y = BASE_Y - cum - h;
               cum += h;
               const catIdx = allCats.findIndex(ac => ac.cid === c.cid);
+              const val = getAvg(c);
+              const showLabel = h >= 11; // only show label if segment tall enough
               return (
-                <rect key={c.cid} x={barLeft(mi)} y={y} width={BAR_W} height={h}
-                  fill={catColors[catIdx % catColors.length]} opacity={0.85} rx={1}>
-                  <title>{c.name}: {getAvg(c).toFixed(1)} / {c.weight} pts</title>
-                </rect>
+                <g key={c.cid}>
+                  <rect x={barLeft(mi)} y={y} width={BAR_W} height={h}
+                    fill={catColors[catIdx % catColors.length]} opacity={0.85} rx={1}>
+                    <title>{c.name}: {val.toFixed(1)} / {c.weight} pts</title>
+                  </rect>
+                  {showLabel && (
+                    <text
+                      x={colX(mi)}
+                      y={y + h / 2 + 3.5}
+                      textAnchor="middle"
+                      fontSize={8.5}
+                      fontWeight="700"
+                      fill="rgba(255,255,255,0.92)"
+                      fontFamily="DM Sans,sans-serif"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {val.toFixed(1)}
+                    </text>
+                  )}
+                </g>
               );
             });
 

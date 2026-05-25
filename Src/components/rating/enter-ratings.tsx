@@ -163,8 +163,6 @@ export default function EnterRatings() {
       const country = countries.find(c => c.id === form.country_id);
       const periodLabel = `${FULL_MONTHS[form.month - 1]} ${form.year}`;
       const priorLabel = form.month === 1 ? `Dec ${form.year - 1}` : `${FULL_MONTHS[form.month - 2]} ${form.year}`;
-      const currentLabel = `${FULL_MONTHS[form.month - 1]} ${form.year}`;
-
       // ── Fetch existing ratings ───────────────────────────────────────────────
       // Priority: (1) current month Likert values, (2) prior month Likert values
       // Only fall back to prior month if current month has NO Likert responses at all
@@ -224,18 +222,15 @@ export default function EnterRatings() {
       instrWs["!cols"] = [{ wch: 22 }, { wch: 60 }];
       XLSX.utils.book_append_sheet(wb, instrWs, "Instructions");
 
-      // Ratings sheet — columns: #, Category, Metric, Rating, Low description, High description
-      // Columns: #, Category, Metric Name, Rating (1-5), Prior/Current, 1, 2, 3, 4, 5
-      const prefillLabel = currentMonthHasLikert ? `Current (${currentLabel})` : `Prior (${priorLabel})`;
-      const headers = ["#", "Category", "Metric Name", "Rating (1-5)", prefillLabel, "1", "2", "3", "4", "5"];
+      // Columns: #, Category, Metric Name, Rating (current month or blank), 1, 2, 3, 4, 5
+      const headers = ["#", "Category", "Metric Name", `Rating — ${periodLabel}`, "1", "2", "3", "4", "5"];
       const rows = [headers];
       metrics.forEach(m => {
-        const prior = prefillValues[m.id] ?? "";
+        const existing = prefillValues[m.id] ?? "";
         const mAnchors = anchors
           .filter(a => a.metric_id === m.id)
           .sort((a, b) => a.score - b.score)
           .filter((a, i, arr) => i === arr.findIndex(x => x.score === a.score));
-        // One description cell per score level
         const anchorDesc = [1,2,3,4,5].map(score => {
           const a = mAnchors.find(x => x.score === score);
           return a ? (a.description || a.label || "") : "";
@@ -244,8 +239,7 @@ export default function EnterRatings() {
           m.number,
           m.categories?.name || "",
           m.name,
-          prior !== "" ? prior : "",
-          prior !== "" ? prior : "",
+          existing !== "" ? existing : "",   // current month value or blank
           ...anchorDesc,
         ]);
       });
@@ -272,9 +266,11 @@ export default function EnterRatings() {
       const range = { s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: headers.length - 1 } };
       ws["!ref"] = XLSX.utils.encode_range(range);
       ws["!cols"] = [
-        { wch: 5 }, { wch: 28 }, { wch: 42 },
-        { wch: 13 }, { wch: 13 },
-        { wch: 26 }, { wch: 26 }, { wch: 26 }, { wch: 26 }, { wch: 26 },
+        { wch: 5 },   // #
+        { wch: 28 },  // Category
+        { wch: 42 },  // Metric Name
+        { wch: 18 },  // Rating — current period
+        { wch: 28 }, { wch: 28 }, { wch: 28 }, { wch: 28 }, { wch: 28 },  // 1-5
       ];
       ws["!rows"] = rows.map((_, i) => i === 0 ? { hpt: 22 } : { hpt: 52 });
 
@@ -283,15 +279,13 @@ export default function EnterRatings() {
           const addr = XLSX.utils.encode_cell({ r, c });
           const isHeader = r === 0;
           const isRating = c === 3;
-          const isPrior = c === 4;
-          const isScore = c >= 5;
+          const isScore = c >= 4;   // score description cols now start at 4 (no prior col)
           const isRef = c <= 2;
           let style;
           if (isHeader) style = isScore ? S.hdScore : S.hd;
           else if (isRating) style = val !== "" ? S.carried : S.rating;
-          else if (isPrior) style = S.prior;
           else if (isRef) style = S.ref;
-          else if (isScore) style = scoreStyles[c - 5];
+          else if (isScore) style = scoreStyles[c - 4];  // 4→s1, 5→s2, 6→s3, 7→s4, 8→s5
           const cellType = typeof val === "number" ? "n" : "s";
           ws[addr] = { v: val === "" ? "" : val, t: cellType, s: style };
         });

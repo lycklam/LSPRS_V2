@@ -151,36 +151,39 @@ export default function ExcelTemplate() {
         ]);
       });
 
-      const dataWs = XLSX.utils.aoa_to_sheet(rows);
+      // Build worksheet cell-by-cell for reliable styling
+      const LS = {
+        hd:     { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 }, fill: { fgColor: { rgb: "0F1B2D" } }, alignment: { horizontal: "center", vertical: "center" } },
+        val:    { fill: { fgColor: { rgb: "FFFDE7" } }, alignment: { horizontal: "center", vertical: "center" } },
+        prior:  { font: { bold: true, color: { rgb: "1565C0" } }, fill: { fgColor: { rgb: "DBEAFE" } }, alignment: { horizontal: "center", vertical: "center" } },
+        ref:    { font: { color: { rgb: "64748B" }, sz: 10 }, fill: { fgColor: { rgb: "F8FAFC" } }, alignment: { vertical: "center" } },
+        unit:   { font: { color: { rgb: "94A3B8" }, sz: 10 }, fill: { fgColor: { rgb: "F8FAFC" } }, alignment: { horizontal: "center", vertical: "center" } },
+      };
+      const dataWs: any = {};
+      const dataRange = { s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: headers.length - 1 } };
+      dataWs["!ref"] = XLSX.utils.encode_range(dataRange);
       dataWs["!cols"] = [
         { wch: 5 },   // #
         { wch: 32 },  // Category
-        { wch: 48 },  // Metric Name
-        { wch: 14 },  // Value ← yellow
+        { wch: 50 },  // Metric Name
+        { wch: 15 },  // Value ← yellow
         { wch: 18 },  // Prior Month ← blue
         { wch: 8 },   // Unit
       ];
+      dataWs["!rows"] = rows.map((_, i) => i === 0 ? { hpt: 22 } : { hpt: 20 });
 
-      // Styles
-      const hdStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0F1B2D" } }, alignment: { horizontal: "center" } };
-      const valStyle = { fill: { fgColor: { rgb: "FFFDE7" } }, alignment: { horizontal: "center" } };
-      const priorStyle = { fill: { fgColor: { rgb: "E3F2FD" } }, alignment: { horizontal: "center" }, font: { color: { rgb: "1565C0" } } };
-      const refStyle = { fill: { fgColor: { rgb: "F5F5F5" } }, font: { color: { rgb: "9E9E9E" } } };
-
-      headers.forEach((_, i) => {
-        const c = XLSX.utils.encode_cell({ r: 0, c: i });
-        if (dataWs[c]) dataWs[c].s = hdStyle;
-      });
-      for (let r = 1; r < rows.length; r++) {
-        const vCell = XLSX.utils.encode_cell({ r, c: 3 });
-        if (dataWs[vCell]) dataWs[vCell].s = valStyle;
-        const pCell = XLSX.utils.encode_cell({ r, c: 4 });
-        if (dataWs[pCell]) dataWs[pCell].s = priorStyle;
-        [0, 1, 2, 5].forEach(c => {
-          const cell = XLSX.utils.encode_cell({ r, c });
-          if (dataWs[cell]) dataWs[cell].s = refStyle;
+      rows.forEach((row, r) => {
+        row.forEach((val, c) => {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          let style;
+          if (r === 0) style = LS.hd;
+          else if (c === 3) style = val !== "" ? LS.prior : LS.val;  // Value col: blue if prefilled, yellow if empty
+          else if (c === 4) style = LS.prior;                          // Prior col: always blue
+          else if (c === 5) style = LS.unit;                           // Unit col
+          else style = LS.ref;                                          // #, Category, Metric Name
+          dataWs[addr] = { v: val === "" ? "" : val, t: typeof val === "number" ? "n" : "s", s: style };
         });
-      }
+      });
       XLSX.utils.book_append_sheet(wb, dataWs, "Data Entry");
 
       // Sheet 3: Metadata

@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { supabase, FULL_MONTHS, SHORT_MONTHS } from "@/lib/supabase";
 import * as XLSX from "xlsx/dist/xlsx.full.min.js";
+import { useToast } from "@/hooks/use-toast";
 
 const SEL = `height:38px;padding:0 12px;border:1.5px solid #CBD5E1;border-radius:8px;font-size:14px;color:#0F1B2D;background:#fff;outline:none;font-family:'DM Sans',sans-serif;width:100%;appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394A3B8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center`;
 const LBL = { fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: "0.02em", textTransform: "uppercase" as const, marginBottom: 5 };
@@ -190,7 +191,7 @@ export default function ExportScorecard() {
   const [exporting, setExporting] = useState(false);
   const [exportType, setExportType] = useState<"lsp"|"internal"|"both">("both");
   const [status, setStatus] = useState("");
-  const { toast } = useToast ? useToast() : { toast: (x: any) => alert(x.title) };
+  const { toast } = useToast();
 
   useEffect(() => {
     supabase.from("suppliers").select("id,name").eq("status","active").order("name")
@@ -530,7 +531,4 @@ export default function ExportScorecard() {
   );
 }
 
-// ── Need useToast ─────────────────────────────────────────────────────────────
-function useToast() {
-  return { toast: ({ title, description, variant }: any) => console.log(title, description) };
-}
+

@@ -111,6 +111,7 @@ export default function RaterApp() {
         {nav === "dashboard" && <ReportingDashboard />}
         {nav === "review"    && <ReviewPanel />}
         {nav === "ratings"   && <EnterRatings />}
+        {nav === "export"    && <ExportScorecard />}
         {nav === "setup" && (
           <div>
             <div className="tab-bar">

@@ -7,7 +7,13 @@ const MONTHS = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","
 const CAT_HEX = ["2563EB","F59E0B","10B981","8B5CF6","EF4444","06B6D4"];
 const CAT_LT  = ["DBEAFE","FEF3C7","D1FAE5","EDE9FE","FEE2E2","CFFAFE"];
 
-const SEL = `height:38px;padding:0 12px;border:1.5px solid #CBD5E1;border-radius:8px;font-size:14px;color:#0F1B2D;background:#fff;outline:none;font-family:'DM Sans',sans-serif;width:100%;appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394A3B8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center`;
+const SEL = {
+  height: "38px", padding: "0 12px", border: "1.5px solid #CBD5E1",
+  borderRadius: "8px", fontSize: "14px", color: "#0F1B2D", background: "#fff",
+  outline: "none", fontFamily: "'DM Sans',sans-serif", width: "100%",
+  appearance: "none" as const, WebkitAppearance: "none" as const, cursor: "pointer",
+  paddingRight: "36px",
+};
 
 function sc(v) {
   if (!v && v !== 0) return {};
@@ -280,14 +286,14 @@ export default function ExportScorecard() {
         <div className="esc-grid">
           <div>
             <div className="esc-lbl">Supplier</div>
-            <select style={{cssText:SEL} as any} value={selSupplier} onChange={e=>setSelSupplier(e.target.value)}>
+            <select style={SEL} value={selSupplier} onChange={e=>setSelSupplier(e.target.value)}>
               <option value="">- Select -</option>
               {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
           <div>
             <div className="esc-lbl">Year</div>
-            <select style={{cssText:SEL} as any} value={year} onChange={e=>setYear(e.target.value)}>
+            <select style={SEL} value={year} onChange={e=>setYear(e.target.value)}>
               {[2024,2025,2026,2027].map(y=><option key={y} value={String(y)}>{y}</option>)}
             </select>
           </div>

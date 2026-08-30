@@ -7,6 +7,7 @@ import MetricRelevanceTab from "@/components/setup/metric-relevance-tab";
 import EnterRatings from "@/components/rating/enter-ratings";
 import ReviewPanel from "@/components/review/review-panel";
 import ReportingDashboard from "@/components/reporting/reporting-dashboard";
+import ExportScorecard from "@/components/reporting/export-scorecard";
 
 const SETUP_TABS = [
   { key: "suppliers", label: "Suppliers" },
@@ -19,9 +20,17 @@ const NAV_ITEMS = [
   { key: "dashboard", label: "Dashboard", icon: ChartIcon },
   { key: "review",    label: "Review & Approve", icon: ReviewIcon },
   { key: "ratings",   label: "Enter Ratings", icon: StarIcon },
+  { key: "export",    label: "Export Scorecards", icon: ExportIcon },
   { key: "setup",     label: "Setup", icon: SettingsIcon },
 ];
 
+function ExportIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path d="M8 2v8M5 7l3 3 3-3M2 12h12" stroke={active ? "#2563EB" : "#94A3B8"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 function ChartIcon({ active }: { active: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -57,6 +66,7 @@ const PAGE_HEADERS: Record<string, { title: string; subtitle: string }> = {
   dashboard: { title: "Reporting Dashboard", subtitle: "Trend analysis, location aggregates and metric drill-down." },
   review:    { title: "Review & Approve", subtitle: "Review monthly submissions and approve or flag them for follow-up." },
   ratings:   { title: "Enter Internal Ratings", subtitle: "Rate qualitative Likert metrics for each supplier location." },
+  export:    { title: "Export Scorecards", subtitle: "Download full scorecard data as Excel — one tab per location, months as columns." },
   setup:     { title: "Setup", subtitle: "Manage suppliers, countries, locations and metric relevance settings." },
 };
 

@@ -280,14 +280,14 @@ export default function ExportScorecard() {
         <div className="esc-grid">
           <div>
             <div className="esc-lbl">Supplier</div>
-            <select style={{cssText:SEL}} value={selSupplier} onChange={e=>setSelSupplier(e.target.value)}>
+            <select style={{cssText:SEL} as any} value={selSupplier} onChange={e=>setSelSupplier(e.target.value)}>
               <option value="">— Select —</option>
               {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
           <div>
             <div className="esc-lbl">Year</div>
-            <select style={{cssText:SEL}} value={year} onChange={e=>setYear(e.target.value)}>
+            <select style={{cssText:SEL} as any} value={year} onChange={e=>setYear(e.target.value)}>
               {[2024,2025,2026,2027].map(y=><option key={y} value={String(y)}>{y}</option>)}
             </select>
           </div>

@@ -305,7 +305,7 @@ export default function ExportScorecard() {
         <div className="esc-legend">
           <div className="esc-li"><div className="esc-sw" style={{background:"#DBEAFE"}}/> Active metric with data</div>
           <div className="esc-li"><div className="esc-sw" style={{background:"#F8FAFC",border:"1px solid #E2E8F0"}}/> Inactive metric (greyed)</div>
-          <div className="esc-li"><div className="esc-sw" style={{background:"#059669"}}/> Score >= 80 (green)</div>
+          <div className="esc-li"><div className="esc-sw" style={{background:"#059669"}}/> Score &gt;= 80 (green)</div>
           <div className="esc-li"><div className="esc-sw" style={{background:"#D97706"}}/> Score 60-79 (amber)</div>
           <div className="esc-li"><div className="esc-sw" style={{background:"#DC2626"}}/> Score &lt; 60 (red)</div>
           <div className="esc-li"><div className="esc-sw" style={{background:"#E2E8F0"}}/> Category / total row</div>
@@ -332,11 +332,11 @@ export default function ExportScorecard() {
            Supplier_LSP_KPIs_2026.xlsx<br/>
           &nbsp;&nbsp;|-- Summary<br/>
           &nbsp;&nbsp;|-- Germany_Langenbach &nbsp;<- rows=metrics, cols=months<br/>
-          &nbsp;&nbsp;`-- Czechoslovakia_Prague<br/>
+          &nbsp;&nbsp;|-- Czechoslovakia_Prague<br/>
           <br/>
            Supplier_Internal_Ratings_2026.xlsx<br/>
           &nbsp;&nbsp;|-- Summary<br/>
-          &nbsp;&nbsp;`-- ...same locations
+          &nbsp;&nbsp;|-- ...same locations
         </div>
       </div>
     </div>

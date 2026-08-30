@@ -45,7 +45,7 @@ function buildSheet(wb, name, locName, months, allMetrics, categories, relevantI
     const catS = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 }, fill: { fgColor: { rgb: CAT_HEX[ci%6] } }, alignment: { horizontal: "left", vertical: "center" } };
     ws[C(r,0)] = mk(cat.number, catS);
     ws[C(r,1)] = mk(cat.name, catS);
-    ws[C(r,2)] = mk(`${cat.weight_pct}%  ·  max ${cat.max_points} pts`, catS);
+    ws[C(r,2)] = mk(`${cat.weight_pct}%   .   max ${cat.max_points} pts`, catS);
     months.forEach((_, mi) => { ws[C(r, FIXED+mi)] = mk("", catS); });
     r++;
 
@@ -62,7 +62,7 @@ function buildSheet(wb, name, locName, months, allMetrics, categories, relevantI
 
       months.forEach((mo, mi) => {
         if (!active) {
-          ws[C(r, FIXED+mi)] = mk("—", { font: { color: { rgb: "CBD5E1" }, sz: 9 }, fill: { fgColor: { rgb: "F8FAFC" } }, alignment: { horizontal: "center" } });
+          ws[C(r, FIXED+mi)] = mk("-", { font: { color: { rgb: "CBD5E1" }, sz: 9 }, fill: { fgColor: { rgb: "F8FAFC" } }, alignment: { horizontal: "center" } });
         } else {
           const resp = respByMonth[mo.key] && respByMonth[mo.key][m.id];
           const val = resp ? resp.val : "";
@@ -108,7 +108,7 @@ function buildSheet(wb, name, locName, months, allMetrics, categories, relevantI
   months.forEach((mo, mi) => {
     const st = mo.status || "";
     const stCol = st === "approved" ? "059669" : st === "flagged" ? "DC2626" : st === "submitted" ? "D97706" : "94A3B8";
-    ws[C(r, FIXED+mi)] = mk(st ? st.charAt(0).toUpperCase()+st.slice(1) : "—", { font: { color: { rgb: stCol }, sz: 9, bold: true }, alignment: { horizontal: "center" } });
+    ws[C(r, FIXED+mi)] = mk(st ? st.charAt(0).toUpperCase()+st.slice(1) : "-", { font: { color: { rgb: stCol }, sz: 9, bold: true }, alignment: { horizontal: "center" } });
   });
   r++;
 
@@ -210,7 +210,7 @@ export default function ExportScorecard() {
       // Summary sheet
       const mkSummary = (type) => {
         const ws = {};
-        ws["A1"] = { v:`${supName} — ${type==="lsp"?"LSP KPIs":"Internal Ratings"} ${year}`, t:"s", s:{ font:{bold:true,color:{rgb:"FFFFFF"},sz:12}, fill:{fgColor:{rgb:"0F1B2D"}}, alignment:{horizontal:"left",vertical:"center"} } };
+        ws["A1"] = { v:`${supName} - ${type==="lsp"?"LSP KPIs":"Internal Ratings"} ${year}`, t:"s", s:{ font:{bold:true,color:{rgb:"FFFFFF"},sz:12}, fill:{fgColor:{rgb:"0F1B2D"}}, alignment:{horizontal:"left",vertical:"center"} } };
         ws["A2"] = { v:`Exported: ${new Date().toLocaleDateString()}  |  ${locations?.length||0} locations  |  Months with data: ${monthCols.map(m=>m.label).join(", ")}`, t:"s", s:{ font:{color:{rgb:"475569"},sz:9} } };
         ws["!ref"] = "A1:Z2";
         ws["!cols"] = [{ wch:80 }];
@@ -242,7 +242,7 @@ export default function ExportScorecard() {
       if (exportType !== "internal") XLSX.writeFile(wbLsp, `${sn}_LSP_KPIs_${year}.xlsx`, { cellStyles:true });
       if (exportType !== "lsp") XLSX.writeFile(wbInt, `${sn}_Internal_Ratings_${year}.xlsx`, { cellStyles:true });
 
-      setStatus(`Done Done — ${locations?.length} location${locations?.length!==1?"s":""} exported.`);
+      setStatus(`Done Done - ${locations?.length} location${locations?.length!==1?"s":""} exported.`);
     } catch(e) {
       setStatus(`Error Failed: ${e.message}`);
       console.error(e);
@@ -276,12 +276,12 @@ export default function ExportScorecard() {
       {/* Selector */}
       <div className="esc-card">
         <div style={{fontSize:15,fontWeight:700,color:"#0F1B2D",marginBottom:4}}>Scorecard Export</div>
-        <div style={{fontSize:13,color:"#64748B",marginBottom:20}}>One Excel file per type · One tab per location · Months as columns · All metrics shown (inactive greyed out)</div>
+        <div style={{fontSize:13,color:"#64748B",marginBottom:20}}>One Excel file per type  .  One tab per location  .  Months as columns  .  All metrics shown (inactive greyed out)</div>
         <div className="esc-grid">
           <div>
             <div className="esc-lbl">Supplier</div>
             <select style={{cssText:SEL} as any} value={selSupplier} onChange={e=>setSelSupplier(e.target.value)}>
-              <option value="">— Select —</option>
+              <option value="">- Select -</option>
               {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>

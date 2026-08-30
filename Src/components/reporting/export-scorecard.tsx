@@ -81,7 +81,7 @@ function buildSheet(wb, name, locName, months, allMetrics, categories, relevantI
     // Category score row
     ws[C(r,0)] = mk("", totS);
     ws[C(r,1)] = mk("", totS);
-    ws[C(r,2)] = mk(`↳ ${cat.name} score`, totS);
+    ws[C(r,2)] = mk(`-> ${cat.name} score`, totS);
     months.forEach((mo, mi) => {
       const s = catByMonth[mo.key] && catByMonth[mo.key][cat.id];
       ws[C(r, FIXED+mi)] = s !== undefined
@@ -135,7 +135,7 @@ export default function ExportScorecard() {
   const runExport = async () => {
     if (!selSupplier) return;
     setExporting(true);
-    setStatus("Loading data…");
+    setStatus("Loading data...");
     try {
       const [
         { data: categories },
@@ -155,7 +155,7 @@ export default function ExportScorecard() {
 
       if (!submissions?.length) { setStatus("No submissions found."); setExporting(false); return; }
 
-      setStatus("Loading responses…");
+      setStatus("Loading responses...");
       const subIds = submissions.map(s => s.id);
       const [{ data: responses }, { data: catScores }, { data: overallScores }] = await Promise.all([
         supabase.from("responses").select("submission_id,metric_id,value_numeric,value_likert,points_earned").in("submission_id",subIds),
@@ -163,7 +163,7 @@ export default function ExportScorecard() {
         supabase.from("overall_scores").select("submission_id,total_score").in("submission_id",subIds),
       ]);
 
-      setStatus("Building workbook…");
+      setStatus("Building workbook...");
 
       // Index
       const subIdx = {};
@@ -242,9 +242,9 @@ export default function ExportScorecard() {
       if (exportType !== "internal") XLSX.writeFile(wbLsp, `${sn}_LSP_KPIs_${year}.xlsx`, { cellStyles:true });
       if (exportType !== "lsp") XLSX.writeFile(wbInt, `${sn}_Internal_Ratings_${year}.xlsx`, { cellStyles:true });
 
-      setStatus(`✓ Done — ${locations?.length} location${locations?.length!==1?"s":""} exported.`);
+      setStatus(`Done Done — ${locations?.length} location${locations?.length!==1?"s":""} exported.`);
     } catch(e) {
-      setStatus(`❌ Failed: ${e.message}`);
+      setStatus(`Error Failed: ${e.message}`);
       console.error(e);
     }
     setExporting(false);
@@ -298,15 +298,15 @@ export default function ExportScorecard() {
       <div className="esc-card">
         <div style={{fontSize:13,fontWeight:700,color:"#0F1B2D",marginBottom:12}}>Export Type</div>
         <div className="esc-type-row">
-          {[["both","📊 Both files"],["lsp","📦 LSP KPIs only"],["internal","⭐ Internal Ratings only"]].map(([k,l])=>(
+          {[["both"," Both files"],["lsp"," LSP KPIs only"],["internal"," Internal Ratings only"]].map(([k,l])=>(
             <button key={k} className={`esc-tb${exportType===k?" active":""}`} onClick={()=>setExportType(k)}>{l}</button>
           ))}
         </div>
         <div className="esc-legend">
           <div className="esc-li"><div className="esc-sw" style={{background:"#DBEAFE"}}/> Active metric with data</div>
           <div className="esc-li"><div className="esc-sw" style={{background:"#F8FAFC",border:"1px solid #E2E8F0"}}/> Inactive metric (greyed)</div>
-          <div className="esc-li"><div className="esc-sw" style={{background:"#059669"}}/> Score ≥ 80 (green)</div>
-          <div className="esc-li"><div className="esc-sw" style={{background:"#D97706"}}/> Score 60–79 (amber)</div>
+          <div className="esc-li"><div className="esc-sw" style={{background:"#059669"}}/> Score >= 80 (green)</div>
+          <div className="esc-li"><div className="esc-sw" style={{background:"#D97706"}}/> Score 60-79 (amber)</div>
           <div className="esc-li"><div className="esc-sw" style={{background:"#DC2626"}}/> Score &lt; 60 (red)</div>
           <div className="esc-li"><div className="esc-sw" style={{background:"#E2E8F0"}}/> Category / total row</div>
         </div>
@@ -316,10 +316,10 @@ export default function ExportScorecard() {
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <button className="esc-btn" onClick={runExport} disabled={!selSupplier||exporting}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M5 7l3 3 3-3M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          {exporting ? "Exporting…" : `Download Excel${exportType==="both"?" Files":" File"}`}
+          {exporting ? "Exporting..." : `Download Excel${exportType==="both"?" Files":" File"}`}
         </button>
         {status && (
-          <div className={`esc-status ${status.startsWith("✓")?"ok":status.startsWith("❌")?"err":"loading"}`}>
+          <div className={`esc-status ${status.startsWith("Done")?"ok":status.startsWith("Error")?"err":"loading"}`}>
             {status}
           </div>
         )}
@@ -329,14 +329,14 @@ export default function ExportScorecard() {
       <div className="esc-card" style={{background:"#F8FAFC"}}>
         <div style={{fontSize:11,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Output structure</div>
         <div className="esc-mono">
-          📁 Supplier_LSP_KPIs_2026.xlsx<br/>
-          &nbsp;&nbsp;├ Summary<br/>
-          &nbsp;&nbsp;├ Germany_Langenbach &nbsp;← rows=metrics, cols=months<br/>
-          &nbsp;&nbsp;└ Czechoslovakia_Prague<br/>
+           Supplier_LSP_KPIs_2026.xlsx<br/>
+          &nbsp;&nbsp;|-- Summary<br/>
+          &nbsp;&nbsp;|-- Germany_Langenbach &nbsp;<- rows=metrics, cols=months<br/>
+          &nbsp;&nbsp;`-- Czechoslovakia_Prague<br/>
           <br/>
-          📁 Supplier_Internal_Ratings_2026.xlsx<br/>
-          &nbsp;&nbsp;├ Summary<br/>
-          &nbsp;&nbsp;└ …same locations
+           Supplier_Internal_Ratings_2026.xlsx<br/>
+          &nbsp;&nbsp;|-- Summary<br/>
+          &nbsp;&nbsp;`-- ...same locations
         </div>
       </div>
     </div>

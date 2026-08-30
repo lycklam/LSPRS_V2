@@ -331,7 +331,7 @@ export default function ExportScorecard() {
         <div className="esc-mono">
            Supplier_LSP_KPIs_2026.xlsx<br/>
           &nbsp;&nbsp;|-- Summary<br/>
-          &nbsp;&nbsp;|-- Germany_Langenbach &nbsp;<- rows=metrics, cols=months<br/>
+          &nbsp;&nbsp;|-- Germany_Langenbach &nbsp; rows=metrics, cols=months<br/>
           &nbsp;&nbsp;|-- Czechoslovakia_Prague<br/>
           <br/>
            Supplier_Internal_Ratings_2026.xlsx<br/>
